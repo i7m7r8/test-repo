@@ -7,12 +7,12 @@ const manifest = {
   description: "Free legal Movies, TV, Docs from Internet Archive. No account needed.",
   logo: "https://archive.org/images/glogo.png",
   catalogs: [
-    { type: "movie",  id: "archive_movies",    name: "Archive Movies",            extra: [{ name: "search" }, { name: "skip" }] },
-    { type: "movie",  id: "archive_classics",  name: "Classic Cinema",            extra: [{ name: "search" }, { name: "skip" }] },
-    { type: "movie",  id: "archive_bollywood", name: "Bollywood & Indian",        extra: [{ name: "search" }, { name: "skip" }] },
-    { type: "series", id: "archive_tv",        name: "TV Shows & Series",         extra: [{ name: "search" }, { name: "skip" }] },
-    { type: "series", id: "archive_docs",      name: "Documentaries",             extra: [{ name: "search" }, { name: "skip" }] },
-    { type: "series", id: "archive_shorts",    name: "Short Films & Animations",  extra: [{ name: "search" }, { name: "skip" }] }
+    { type: "movie",  id: "archive_movies",    name: "Archive Movies",           extra: [{ name: "search" }, { name: "skip" }] },
+    { type: "movie",  id: "archive_classics",  name: "Classic Cinema",           extra: [{ name: "search" }, { name: "skip" }] },
+    { type: "movie",  id: "archive_bollywood", name: "Bollywood & Indian",       extra: [{ name: "search" }, { name: "skip" }] },
+    { type: "series", id: "archive_tv",        name: "TV Shows & Series",        extra: [{ name: "search" }, { name: "skip" }] },
+    { type: "series", id: "archive_docs",      name: "Documentaries",            extra: [{ name: "search" }, { name: "skip" }] },
+    { type: "series", id: "archive_shorts",    name: "Short Films & Animations", extra: [{ name: "search" }, { name: "skip" }] }
   ],
   resources: ["catalog", "stream", "meta"],
   types: ["movie", "series"],
@@ -55,6 +55,17 @@ function respond(res, data) {
   res.end(JSON.stringify(data));
 }
 
+// Parse extra params from Stremio URL like /catalog/movie/archive_movies/search=batman.json
+function parseExtra(segment) {
+  const extra = {};
+  if (!segment) return extra;
+  segment.split("&").forEach(part => {
+    const [k, v] = part.split("=");
+    if (k && v) extra[decodeURIComponent(k)] = decodeURIComponent(v);
+  });
+  return extra;
+}
+
 module.exports = async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "*");
@@ -62,23 +73,35 @@ module.exports = async (req, res) => {
 
   if (req.method === "OPTIONS") { res.status(200).end(); return; }
 
-  const url = req.url || "/";
-  const path = url.split("?")[0];
+  const rawUrl = req.url || "/";
+  const path = rawUrl.split("?")[0];
 
   // Manifest
   if (path === "/" || path === "/manifest.json") {
     return respond(res, manifest);
   }
 
-  // Catalog: /catalog/:type/:id.json or /catalog/:type/:id/skip=X.json
-  const catalogMatch = path.match(/^\/catalog\/([^/]+)\/([^/]+?)(?:\/skip=(\d+))?\.json$/);
+  // Catalog: /catalog/:type/:id.json
+  //      or: /catalog/:type/:id/search=batman.json
+  //      or: /catalog/:type/:id/skip=20.json
+  //      or: /catalog/:type/:id/search=batman&skip=20.json
+  const catalogMatch = path.match(/^\/catalog\/([^/]+)\/([^/]+?)(?:\/([^/]+?))?\.json$/);
   if (catalogMatch) {
-    const [, type, id, skip] = catalogMatch;
-    const search = new URL("http://x.com" + url).searchParams.get("search") || "";
+    const [, type, id, extraStr] = catalogMatch;
+    const extra = parseExtra(extraStr);
+    // Also check query string as fallback
+    const qs = new URL("http://x.com" + rawUrl).searchParams;
+    const search = extra.search || qs.get("search") || "";
+    const skip = parseInt(extra.skip || qs.get("skip") || 0);
+
     const baseQuery = CATALOG_CONFIG[id] || "mediatype:movies";
-    const query = search ? `mediatype:movies AND title:(${search})` : baseQuery;
+    // Fix: proper search query for archive.org
+    const query = search
+      ? `mediatype:movies AND (title:(${search}) OR description:(${search}) OR subject:(${search}))`
+      : baseQuery;
+
     try {
-      const docs = await searchArchive(query, parseInt(skip || 0));
+      const docs = await searchArchive(query, skip);
       return respond(res, { metas: docs.map(d => buildMeta(d, type)) });
     } catch (e) {
       return respond(res, { metas: [] });
@@ -100,22 +123,24 @@ module.exports = async (req, res) => {
         videos = videoFiles.map((f, i) => ({
           id: `arch_${identifier}_ep${i}`,
           title: f.name.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " "),
-          season: 1, episode: i + 1,
+          season: 1,
+          episode: i + 1,
           released: new Date().toISOString()
         }));
       }
-      const meta = {
-        id, type,
-        name: Array.isArray(data.title) ? data.title[0] : data.title || identifier,
-        poster: `https://archive.org/services/img/${identifier}`,
-        background: `https://archive.org/services/img/${identifier}`,
-        description: Array.isArray(data.description) ? data.description[0] : data.description || "",
-        year: data.year ? String(data.year).slice(0, 4) : undefined,
-        genres: Array.isArray(data.subject) ? data.subject.slice(0, 5) : data.subject ? [data.subject] : [],
-        website: `https://archive.org/details/${identifier}`,
-        ...(videos.length > 0 && { videos })
-      };
-      return respond(res, { meta });
+      return respond(res, {
+        meta: {
+          id, type,
+          name: Array.isArray(data.title) ? data.title[0] : data.title || identifier,
+          poster: `https://archive.org/services/img/${identifier}`,
+          background: `https://archive.org/services/img/${identifier}`,
+          description: Array.isArray(data.description) ? data.description[0] : data.description || "",
+          year: data.year ? String(data.year).slice(0, 4) : undefined,
+          genres: Array.isArray(data.subject) ? data.subject.slice(0, 5) : data.subject ? [data.subject] : [],
+          website: `https://archive.org/details/${identifier}`,
+          ...(videos.length > 0 && { videos })
+        }
+      });
     } catch (e) {
       return respond(res, { meta: { id, type, name: id } });
     }
@@ -131,22 +156,38 @@ module.exports = async (req, res) => {
     try {
       const r = await axios.get(`https://archive.org/metadata/${identifier}`, { timeout: 8000 });
       const files = r.data?.files || [];
-      const videoFiles = files.filter(f => f.name && /\.(mp4|mkv|avi|ogv|webm|mov)$/i.test(f.name));
+
+      // Prefer mp4 for native player compatibility
+      const mp4Files = files.filter(f => f.name && /\.mp4$/i.test(f.name));
+      const allVideoFiles = files.filter(f => f.name && /\.(mp4|mkv|avi|ogv|webm|mov)$/i.test(f.name));
+      const videoFiles = mp4Files.length > 0 ? mp4Files : allVideoFiles;
+
       if (!videoFiles.length) return respond(res, { streams: [] });
-      const targets = type === "series" ? [videoFiles[epIdx] || videoFiles[0]] : videoFiles.slice(0, 5);
-      const streams = targets.map(f => ({
-        url: `https://archive.org/download/${identifier}/${encodeURIComponent(f.name)}`,
-        name: "ArchiveStream",
-        title: `${f.name.replace(/\.[^/.]+$/, "")}\n${f.name.split(".").pop().toUpperCase()} • ${f.size ? (parseInt(f.size)/1024/1024).toFixed(0)+" MB" : ""}`,
-        behaviorHints: { notWebReady: false, bingeGroup: `arch_${identifier}` }
-      }));
+
+      const targets = type === "series"
+        ? [videoFiles[epIdx] || videoFiles[0]]
+        : videoFiles.slice(0, 4);
+
+      const streams = targets.map(f => {
+        const ext = f.name.split(".").pop().toUpperCase();
+        const size = f.size ? `${(parseInt(f.size) / 1024 / 1024).toFixed(0)} MB` : "";
+        return {
+          url: `https://archive.org/download/${identifier}/${encodeURIComponent(f.name)}`,
+          name: "ArchiveStream",
+          title: `${f.name.replace(/\.[^/.]+$/, "")}\n${ext} ${size}`,
+          behaviorHints: {
+            notWebReady: false,
+            bingeGroup: `arch_${identifier}`
+          }
+        };
+      });
+
       return respond(res, { streams });
     } catch (e) {
       return respond(res, { streams: [] });
     }
   }
 
-  res.setHeader("Content-Type", "application/json");
   res.statusCode = 404;
   res.end(JSON.stringify({ error: "Not found" }));
 };
