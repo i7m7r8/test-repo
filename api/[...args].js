@@ -162,8 +162,9 @@ module.exports = async (req, res) => {
           const name = clean(item.title.replace(/^\[.*?\]\s*/, ""));
           if (!name || seen.has(name.toLowerCase())) continue;
           seen.add(name.toLowerCase());
+          const encodedName = encodeURIComponent(name).replace(/%/g, "_");
           metas.push({
-            id: `ms_${item.hash}`,
+            id: `ms_${item.hash}_${encodedName}`,
             type: "series",
             name,
             poster: `https://via.placeholder.com/300x450/0f0f1a/e879f9?text=${encodeURIComponent(name.slice(0, 15))}`,
@@ -187,8 +188,10 @@ module.exports = async (req, res) => {
         const name = clean(t.name);
         if (!name || seen.has(name.toLowerCase())) continue;
         seen.add(name.toLowerCase());
+        // Encode title in ID so meta/stream don't need to re-fetch
+        const encodedName = encodeURIComponent(name).replace(/%/g, "_");
         metas.push({
-          id: `ms_${t.info_hash.toLowerCase()}`,
+          id: `ms_${t.info_hash.toLowerCase()}_${encodedName}`,
           type,
           name,
           poster: `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent(name.slice(0, 15))}`,
@@ -206,57 +209,28 @@ module.exports = async (req, res) => {
     }
   }
 
-  // META — fetch TMDB poster + info
+  // META — title is encoded in ID as ms_HASH_ENCODEDTITLE
   const mm = path.match(/^\/meta\/([^/]+)\/(ms_[^/]+?)\.json$/);
   if (mm) {
     const [, type, id] = mm;
-    const hash = id.replace("ms_", "");
+    // Extract hash and title from ID
+    const parts = id.replace("ms_", "").split("_");
+    const hash = parts[0];
+    const name = parts.length > 1
+      ? decodeURIComponent(parts.slice(1).join("_").replace(/_/g, "%"))
+      : hash.slice(0, 12);
 
-    // Try to get title from apibay
-    let name = "";
-    let posterUrl = "";
-    let description = "";
-    let releaseYear = "";
-
-    try {
-      const target = `https://apibay.org/t.php?h=${hash}`;
-      const urls = [
-        `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(target)}`,
-        `http://www.whateverorigin.org/get?url=${encodeURIComponent(target)}`,
-      ];
-      for (const url of urls) {
-        try {
-          const r = await axios.get(url, { timeout: 8000, headers: { "User-Agent": "Mozilla/5.0" } });
-          let d = r.data;
-          if (d && d.contents) { try { d = JSON.parse(d.contents); } catch(e) {} }
-          if (d && d.get)      { try { d = JSON.parse(d.get); }      catch(e) {} }
-          if (typeof d === "string") { try { d = JSON.parse(d); } catch(e) {} }
-          const t = Array.isArray(d) ? d[0] : d;
-          if (t && t.name) {
-            name = clean(t.name);
-            description = `${quality(t.name)} | 🌱 ${t.seeders} seeds | 💾 ${sizeStr(t.size)}\n\n${t.name}`;
-            releaseYear = year(t.name);
-            break;
-          }
-        } catch(e) { continue; }
-      }
-    } catch(e) {}
-
-    // Fetch TMDB poster if we have a name
-    if (name) {
-      posterUrl = await getTmdbPoster(name, type);
-    } else {
-      name = hash.slice(0, 12) + "...";
-      posterUrl = `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=Loading`;
-    }
+    // Fetch TMDB poster
+    const posterUrl = name.length > 5
+      ? await getTmdbPoster(name, type)
+      : `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=Loading`;
 
     return respond(res, {
       meta: {
         id, type, name,
         poster: posterUrl,
         background: posterUrl,
-        description,
-        year: releaseYear,
+        description: name,
         genres: []
       }
     });
@@ -272,48 +246,29 @@ module.exports = async (req, res) => {
     let streams = [];
 
     try {
-      // First stream: the direct hash we have
+      // Extract title from ID: ms_HASH_ENCODEDTITLE
+      const idParts = id.replace("ms_", "").split("_");
+      const titleFromId = idParts.length > 1
+        ? decodeURIComponent(idParts.slice(1).join("_").replace(/_/g, "%"))
+        : "";
+
+      // First stream: the direct hash
       streams.push({
-        name: "MultiStream",
-        title: "⚡ Play",
+        name: `MultiStream`,
+        title: `${titleFromId || "⚡ Play"}\n🔍 Searching...`,
         infoHash: hash,
         sources: TRACKERS,
         behaviorHints: { notWebReady: false, bingeGroup: `ms_${hash}` }
       });
 
-      // Try to find more streams by searching title
-      const target = `https://apibay.org/t.php?h=${hash}`;
-      const urls = [
-        `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(target)}`,
-        `http://www.whateverorigin.org/get?url=${encodeURIComponent(target)}`,
-      ];
-      let torrentName = "";
-      for (const url of urls) {
-        try {
-          const r = await axios.get(url, { timeout: 8000, headers: { "User-Agent": "Mozilla/5.0" } });
-          let d = r.data;
-          if (d && d.contents) { try { d = JSON.parse(d.contents); } catch(e) {} }
-          if (d && d.get)      { try { d = JSON.parse(d.get); }      catch(e) {} }
-          if (typeof d === "string") { try { d = JSON.parse(d); } catch(e) {} }
-          const t = Array.isArray(d) ? d[0] : d;
-          if (t && t.name) {
-            torrentName = t.name;
-            // Update first stream with real info
-            streams[0].name = `MultiStream\n${quality(t.name)}`;
-            streams[0].title = `${clean(t.name)}\n💾 ${sizeStr(t.size)} | 🌱 ${t.seeders} seeds`;
-            break;
-          }
-        } catch(e) { continue; }
-      }
-
-      // Search for more quality options
-      if (torrentName) {
-        const title = clean(torrentName);
+      // Search for more quality options using title from ID
+      if (titleFromId) {
         const cat = type === "movie" ? "207" : "205";
-        const more = await tpbSearch(title, cat);
+        const more = await tpbSearch(titleFromId, cat);
         const seen = new Set([hash]);
+        streams = []; // rebuild with real data
         for (const t of more) {
-          if (!t.info_hash || seen.has(t.info_hash.toLowerCase()) || parseInt(t.seeders) < 3) continue;
+          if (!t.info_hash || seen.has(t.info_hash.toLowerCase()) || parseInt(t.seeders) < 1) continue;
           seen.add(t.info_hash.toLowerCase());
           streams.push({
             name: `MultiStream\n${quality(t.name)}`,
@@ -323,6 +278,16 @@ module.exports = async (req, res) => {
             behaviorHints: { notWebReady: false, bingeGroup: `ms_${hash}` }
           });
           if (streams.length >= 8) break;
+        }
+        // fallback if search returned nothing
+        if (!streams.length) {
+          streams.push({
+            name: "MultiStream",
+            title: `${titleFromId}\n⚡ Play`,
+            infoHash: hash,
+            sources: TRACKERS,
+            behaviorHints: { notWebReady: false }
+          });
         }
       }
     } catch(e) {
