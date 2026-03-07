@@ -166,7 +166,7 @@ function buildStreams(results, refHash) {
   const seen = new Set(refHash ? [refHash] : []);
   const packs = [], singles = [];
   for (const t of results) {
-    if (!t.info_hash || parseInt(t.seeders) < 1) continue;
+    if (!t.info_hash || parseInt(t.seeders) < 5) continue;
     const h = t.info_hash.toLowerCase();
     if (seen.has(h)) continue;
     seen.add(h);
@@ -238,7 +238,7 @@ module.exports = async (req, res) => {
       const seen = new Set();
       const metas = [];
       for (const t of results) {
-        if (!t.info_hash || parseInt(t.seeders) < 1) continue;
+        if (!t.info_hash || parseInt(t.seeders) < 5) continue;
         const name = clean(t.name);
         if (!name || seen.has(name.toLowerCase())) continue;
         seen.add(name.toLowerCase());
