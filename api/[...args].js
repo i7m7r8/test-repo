@@ -127,10 +127,12 @@ async function tmdbFindByImdb(imdbId) {
 // ── apibay via proxies ────────────────────────────────────────
 async function tpbSearch(q, cat) {
   const target = `https://apibay.org/q.php?q=${encodeURIComponent(q)}&cat=${cat}`;
+  // Try our own self-proxy first (same Vercel deployment = no IP block)
+  const selfProxy = `https://test-repo-six-sepia.vercel.app/proxy?url=${encodeURIComponent(target)}`;
   const urls = [
+    selfProxy,
     `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(target)}`,
     `http://www.whateverorigin.org/get?url=${encodeURIComponent(target)}`,
-    `https://crossorigin.me/${target}`,
   ];
   for (const url of urls) {
     try {
@@ -200,6 +202,34 @@ module.exports = async (req, res) => {
   if (req.method === "OPTIONS") { res.status(200).end(); return; }
 
   const path = (req.url || "/").split("?")[0];
+
+  // SELF-PROXY — called by tpbSearch internally via localhost
+  // GET /proxy?url=https://apibay.org/q.php?q=...
+  if (path === "/proxy") {
+    const target = (req.url || "").split("?").slice(1).join("?").replace(/^url=/, "");
+    const decoded = decodeURIComponent(target);
+    if (!decoded.startsWith("https://apibay.org/") && !decoded.startsWith("https://nyaa.si/")) {
+      res.statusCode = 403; res.end("{}"); return;
+    }
+    try {
+      const https = require("https");
+      const data = await new Promise((resolve, reject) => {
+        const u = new URL(decoded);
+        const r = https.request({
+          hostname: u.hostname, path: u.pathname + u.search, method: "GET",
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+          timeout: 10000
+        }, (resp) => { let b = ""; resp.on("data", c => b += c); resp.on("end", () => resolve(b)); });
+        r.on("error", reject);
+        r.on("timeout", () => { r.destroy(); reject(new Error("timeout")); });
+        r.end();
+      });
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.end(data);
+    } catch(e) { res.statusCode = 500; res.end("[]"); }
+    return;
+  }
 
   // MANIFEST
   if (path === "/" || path === "/manifest.json") return respond(res, manifest);
