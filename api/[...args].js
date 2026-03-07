@@ -266,28 +266,33 @@ module.exports = async (req, res) => {
         const cat = type === "movie" ? "207" : "205";
         const more = await tpbSearch(titleFromId, cat);
         const seen = new Set([hash]);
-        streams = []; // rebuild with real data
+        const packs = [];   // season packs / full movies (large files, high seeds)
+        const singles = []; // single episodes
+
         for (const t of more) {
           if (!t.info_hash || seen.has(t.info_hash.toLowerCase()) || parseInt(t.seeders) < 1) continue;
           seen.add(t.info_hash.toLowerCase());
           const q = quality(t.name);
           const sz = sizeStr(t.size);
           const sd = parseInt(t.seeders);
-          // Skip tiny files (single eps under 100MB - usually bad quality)
-          if (parseInt(t.size) < 100 * 1024 * 1024 && type !== "series") continue;
-          // Extract season/ep info
           const epMatch = t.name.match(/S(\d+)(?:E(\d+))?/i);
-          const epInfo = epMatch ? ` S${epMatch[1]}${epMatch[2] ? "E"+epMatch[2] : ""}` : "";
-          streams.push({
+          const isSeasonPack = epMatch && !epMatch[2]; // S01 but no E01
+          const isSingleEp = epMatch && epMatch[2];
+          const epInfo = epMatch ? ` S${epMatch[1]}${epMatch[2] ? "E"+epMatch[2] : " (Full Season)"}` : "";
+          const stream = {
             name: `MultiStream\n${q}`,
             title: `${clean(t.name)}${epInfo}\n💾 ${sz} | 🌱 ${sd} seeds`,
             infoHash: t.info_hash.toLowerCase(),
             sources: TRACKERS,
             behaviorHints: { notWebReady: false, bingeGroup: `ms_${hash}` }
-          });
-          if (streams.length >= 8) break;
+          };
+          if (isSeasonPack || !isSingleEp) packs.push(stream);
+          else singles.push(stream);
         }
-        // fallback if search returned nothing
+
+        // Show packs first, then singles — max 8 total
+        streams = [...packs, ...singles].slice(0, 8);
+
         if (!streams.length) {
           streams.push({
             name: "MultiStream",
