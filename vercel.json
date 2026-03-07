@@ -1,5 +1,14 @@
 {
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/api/stremio" }
-  ]
+  "version": 2,
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/api/[...args].js"
+    }
+  ],
+  "functions": {
+    "api/[...args].js": {
+      "maxDuration": 30
+    }
+  }
 }
