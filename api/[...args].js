@@ -203,27 +203,74 @@ module.exports = async (req, res) => {
 
   const path = (req.url || "/").split("?")[0];
 
-  // SELF-PROXY — called by tpbSearch internally via localhost
-  // GET /proxy?url=https://apibay.org/q.php?q=...
+  // SELF-PROXY
   if (path === "/proxy") {
-    const target = (req.url || "").split("?").slice(1).join("?").replace(/^url=/, "");
-    const decoded = decodeURIComponent(target);
+    const qs = (req.url || "").indexOf("?") >= 0 ? (req.url || "").slice((req.url || "").indexOf("?") + 1) : "";
+    const params = new URLSearchParams(qs);
+    const decoded = params.get("url") || "";
     if (!decoded.startsWith("https://apibay.org/") && !decoded.startsWith("https://nyaa.si/")) {
-      res.statusCode = 403; res.end("{}"); return;
+      res.statusCode = 403; res.end("[]"); return;
     }
+    const UAS = [
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+      "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0",
+    ];
+    const ua = UAS[Math.floor(Math.random() * UAS.length)];
     try {
       const https = require("https");
-      const data = await new Promise((resolve, reject) => {
-        const u = new URL(decoded);
+      const fetchUrl = (url) => new Promise((resolve, reject) => {
+        const u = new URL(url);
         const r = https.request({
           hostname: u.hostname, path: u.pathname + u.search, method: "GET",
-          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-          timeout: 10000
-        }, (resp) => { let b = ""; resp.on("data", c => b += c); resp.on("end", () => resolve(b)); });
+          headers: {
+            "User-Agent": ua,
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Cache-Control": "no-cache",
+            "Referer": "https://www.google.com/",
+          },
+          timeout: 12000
+        }, (resp) => {
+          // follow redirect
+          if (resp.statusCode >= 300 && resp.statusCode < 400 && resp.headers.location) {
+            return fetchUrl(resp.headers.location).then(resolve).catch(reject);
+          }
+          let b = ""; resp.on("data", c => b += c); resp.on("end", () => resolve(b));
+        });
         r.on("error", reject);
         r.on("timeout", () => { r.destroy(); reject(new Error("timeout")); });
         r.end();
       });
+
+      // If apibay, also try fetching cat=0 (all) in parallel for more results
+      let data = "[]";
+      if (decoded.includes("apibay.org/q.php")) {
+        const u = new URL(decoded);
+        const q = u.searchParams.get("q");
+        const cat = u.searchParams.get("cat") || "0";
+        // Fetch both the requested cat and cat=0 in parallel
+        const [r1, r2] = await Promise.allSettled([
+          fetchUrl(decoded),
+          cat !== "0" ? fetchUrl(`https://apibay.org/q.php?q=${encodeURIComponent(q)}&cat=0`) : Promise.resolve("[]")
+        ]);
+        let arr1 = [], arr2 = [];
+        try { arr1 = JSON.parse(r1.status === "fulfilled" ? r1.value : "[]"); } catch(e) {}
+        try { arr2 = JSON.parse(r2.status === "fulfilled" ? r2.value : "[]"); } catch(e) {}
+        // Merge and deduplicate by info_hash, sort by seeders desc
+        const seen = new Set();
+        const merged = [];
+        for (const t of [...arr1, ...arr2]) {
+          if (!t.info_hash || t.id === "0" || seen.has(t.info_hash)) continue;
+          seen.add(t.info_hash);
+          merged.push(t);
+        }
+        merged.sort((a, b) => parseInt(b.seeders) - parseInt(a.seeders));
+        data = JSON.stringify(merged);
+      } else {
+        data = await fetchUrl(decoded);
+      }
+
       res.setHeader("Content-Type", "application/json");
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.end(data);
