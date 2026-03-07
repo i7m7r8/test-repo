@@ -205,9 +205,19 @@ module.exports = async (req, res) => {
 
   // SELF-PROXY
   if (path === "/proxy") {
-    const qs = (req.url || "").indexOf("?") >= 0 ? (req.url || "").slice((req.url || "").indexOf("?") + 1) : "";
-    const params = new URLSearchParams(qs);
-    const decoded = params.get("url") || "";
+    // Vercel may decode %26→& so URLSearchParams breaks for nested URLs
+    // Manually extract everything after "url=" as the target
+    const rawUrl = req.url || "";
+    const urlIdx = rawUrl.indexOf("?url=");
+    const rawTarget = urlIdx >= 0 ? rawUrl.slice(urlIdx + 5) : "";
+    // Decode only once - handles both encoded and raw & 
+    let decoded = "";
+    try { decoded = decodeURIComponent(rawTarget); } catch(e) { decoded = rawTarget; }
+    // If decoded still has issues, try taking up to first unrelated &
+    if (!decoded.startsWith("https://apibay.org/") && !decoded.startsWith("https://nyaa.si/")) {
+      // Try without decoding
+      decoded = rawTarget.startsWith("https") ? rawTarget : "";
+    }
     if (!decoded.startsWith("https://apibay.org/") && !decoded.startsWith("https://nyaa.si/")) {
       res.statusCode = 403; res.end("[]"); return;
     }
