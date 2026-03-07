@@ -1,24 +1,12 @@
 const axios = require("axios");
 
 const manifest = {
-  id: "community.multistream.v3",
-  version: "3.0.0",
+  id: "community.multistream.v4",
+  version: "4.0.0",
   name: "MultiStream",
-  description: "Bollywood, Hollywood, TV Shows & Anime — Massive content via torrent search.",
+  description: "TV Shows & Anime — EZTV + Nyaa. Torrent streams directly in Stremio.",
   logo: "https://i.imgur.com/uwDqNDd.png",
   catalogs: [
-    {
-      type: "movie",
-      id: "ms_hollywood",
-      name: "🎬 Hollywood",
-      extra: [{ name: "search" }, { name: "skip" }]
-    },
-    {
-      type: "movie",
-      id: "ms_bollywood",
-      name: "🇮🇳 Bollywood & Hindi",
-      extra: [{ name: "search" }, { name: "skip" }]
-    },
     {
       type: "series",
       id: "ms_tvshows",
@@ -33,7 +21,7 @@ const manifest = {
     }
   ],
   resources: ["catalog", "stream", "meta"],
-  types: ["movie", "series"],
+  types: ["series"],
   idPrefixes: ["ms_"],
   behaviorHints: { adult: true, p2p: true }
 };
@@ -44,24 +32,8 @@ const TRACKERS = [
   "tracker:udp://tracker.coppersurfer.tk:6969",
   "tracker:udp://tracker.opentrackr.org:1337/announce",
   "tracker:udp://tracker.leechers-paradise.org:6969",
-  "tracker:udp://p4p.arenabg.com:1337"
+  "tracker:http://nyaa.tracker.wf:7777/announce"
 ];
-
-const CATALOG_QUERIES = {
-  ms_hollywood: "movie 1080p",
-  ms_bollywood: "hindi 1080p",
-  ms_tvshows:   "tv show season",
-  ms_anime:     "anime 1080p"
-};
-
-// Category filters for TPB
-// 200=video, 205=TV, 207=HD Movies, 208=HD TV
-const CATALOG_CATS = {
-  ms_hollywood: "207",
-  ms_bollywood: "200",
-  ms_tvshows:   "205",
-  ms_anime:     "205"
-};
 
 function respond(res, data) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -79,15 +51,6 @@ function parseExtra(str) {
   return out;
 }
 
-async function tpbSearch(query, cat = "0", skip = 0) {
-  const page = Math.floor(skip / 20);
-  const url = `https://apibay.org/q.php?q=${encodeURIComponent(query)}&cat=${cat}&p=${page}`;
-  const res = await axios.get(url, { timeout: 10000 });
-  const data = res.data;
-  if (!Array.isArray(data) || (data.length === 1 && data[0].id === "0")) return [];
-  return data;
-}
-
 function sizeStr(bytes) {
   const n = parseInt(bytes) || 0;
   if (n > 1073741824) return (n / 1073741824).toFixed(2) + " GB";
@@ -103,15 +66,11 @@ function qualityFromName(name) {
   return "SD";
 }
 
-function yearFromName(name) {
-  const m = name.match(/\b(19|20)\d{2}\b/);
-  return m ? m[0] : "";
-}
-
 function cleanTitle(name) {
   return name
+    .replace(/S\d+E\d+.*/i, "")
     .replace(/\(?\d{4}\)?/, "")
-    .replace(/1080p|720p|480p|4K|2160p|BluRay|WEBRip|WEB-DL|HDTV|DVDRip|x264|x265|HEVC|AAC|DD5\.1|ESub|YIFY|YTS|EZTV/gi, "")
+    .replace(/1080p|720p|480p|4K|2160p|BluRay|WEBRip|WEB-DL|HDTV|DVDRip|x264|x265|HEVC|AAC|DD5\.1|ESub|EZTV|YIFY/gi, "")
     .replace(/\[.*?\]/g, "")
     .replace(/\(.*?\)/g, "")
     .replace(/[-._]+/g, " ")
@@ -119,21 +78,74 @@ function cleanTitle(name) {
     .trim();
 }
 
-function torrentToMeta(t, type) {
-  const title = cleanTitle(t.name);
-  const year = yearFromName(t.name);
-  const quality = qualityFromName(t.name);
+// ── EZTV ──────────────────────────────────────────────────────
+async function eztvSearch(query, skip = 0) {
+  const page = Math.floor(skip / 20) + 1;
+  let url;
+  if (query) {
+    url = `https://eztvx.to/api/get-torrents?limit=20&page=${page}&imdb_id=0`;
+    // EZTV API doesn't support name search — use all torrents and filter
+    url = `https://eztvx.to/api/get-torrents?limit=100&page=${page}`;
+  } else {
+    url = `https://eztvx.to/api/get-torrents?limit=20&page=${page}`;
+  }
+  const res = await axios.get(url, { timeout: 10000 });
+  let torrents = res.data?.torrents || [];
+  if (query) {
+    const q = query.toLowerCase();
+    torrents = torrents.filter(t => t.title?.toLowerCase().includes(q));
+  }
+  return torrents.slice(0, 20);
+}
+
+function eztvToMeta(t) {
+  const title = cleanTitle(t.title || "");
   return {
-    id: `ms_${t.info_hash.toLowerCase()}`,
-    type,
-    name: title || t.name,
-    poster: `https://via.placeholder.com/300x450/1a1a2e/818cf8?text=${encodeURIComponent(title.slice(0, 20))}`,
-    description: `${quality} | Seeds: ${t.seeders} | Size: ${sizeStr(t.size)}`,
-    year,
-    genres: []
+    id: `ms_eztv_${t.imdb_id || t.id}`,
+    type: "series",
+    name: title || t.title,
+    poster: t.small_screenshot || `https://via.placeholder.com/300x450/1a1a2e/818cf8?text=${encodeURIComponent((title || "TV").slice(0, 15))}`,
+    description: `Seeds: ${t.seeds} | ${sizeStr(t.size_bytes)}`,
+    year: t.title?.match(/\b(19|20)\d{2}\b/)?.[0] || ""
   };
 }
 
+// ── NYAA ──────────────────────────────────────────────────────
+async function nyaaSearch(query, skip = 0) {
+  const page = Math.floor(skip / 20);
+  const url = `https://nyaa.si/?page=rss&q=${encodeURIComponent(query || "anime")}&c=1_0&f=0&p=${page}`;
+  const res = await axios.get(url, { timeout: 10000 });
+  const items = [];
+  const matches = res.data.matchAll(/<item>([\s\S]*?)<\/item>/g);
+  for (const m of matches) {
+    const block = m[1];
+    const title = block.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/)?.[1]
+                || block.match(/<title>(.*?)<\/title>/)?.[1] || "";
+    const magnet = block.match(/<nyaa:magnetURI><!\[CDATA\[(.*?)\]\]><\/nyaa:magnetURI>/)?.[1] || "";
+    const hash = magnet.match(/btih:([a-fA-F0-9]{40})/i)?.[1]?.toLowerCase() || "";
+    const size = block.match(/<nyaa:size>(.*?)<\/nyaa:size>/)?.[1] || "";
+    const seeders = block.match(/<nyaa:seeders>(.*?)<\/nyaa:seeders>/)?.[1] || "0";
+    if (title && hash) items.push({ title, hash, size, seeders });
+    if (items.length >= 20) break;
+  }
+  return items;
+}
+
+function nyaaToMeta(item) {
+  const name = cleanTitle(
+    item.title.replace(/\[.*?\]/g, "").replace(/\(.*?\)/g, "").split(" - ")[0].trim()
+  );
+  return {
+    id: `ms_nyaa_${item.hash}`,
+    type: "series",
+    name: name || item.title,
+    poster: `https://via.placeholder.com/300x450/1a1a2e/e879f9?text=${encodeURIComponent((name || "Anime").slice(0, 15))}`,
+    description: `${item.title}\nSeeds: ${item.seeders} | ${item.size}`,
+    genres: ["Anime"]
+  };
+}
+
+// ── MAIN ──────────────────────────────────────────────────────
 module.exports = async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "*");
@@ -148,7 +160,7 @@ module.exports = async (req, res) => {
     return respond(res, manifest);
   }
 
-  // CATALOG  /catalog/:type/:id/:extra.json
+  // CATALOG
   const catMatch = path.match(/^\/catalog\/([^/]+)\/([^/]+?)(?:\/([^/]+?))?\.json$/);
   if (catMatch) {
     const [, type, id, extraStr] = catMatch;
@@ -156,102 +168,143 @@ module.exports = async (req, res) => {
     const search = extra.search || "";
     const skip = parseInt(extra.skip || 0);
 
-    const baseQuery = CATALOG_QUERIES[id] || "movie";
-    const cat = CATALOG_CATS[id] || "0";
-    const query = search || baseQuery;
-
     try {
-      const results = await tpbSearch(query, cat, skip);
-
-      // Deduplicate by cleaned title
-      const seen = new Set();
-      const metas = [];
-      for (const t of results) {
-        if (!t.info_hash || t.seeders === "0") continue;
-        const title = cleanTitle(t.name);
-        if (!seen.has(title.toLowerCase())) {
-          seen.add(title.toLowerCase());
-          metas.push(torrentToMeta(t, type));
+      if (id === "ms_tvshows") {
+        const torrents = await eztvSearch(search, skip);
+        const seen = new Set();
+        const metas = [];
+        for (const t of torrents) {
+          const m = eztvToMeta(t);
+          if (!seen.has(m.name.toLowerCase())) {
+            seen.add(m.name.toLowerCase());
+            metas.push(m);
+          }
         }
+        return respond(res, { metas });
       }
 
-      return respond(res, { metas: metas.slice(0, 20) });
+      if (id === "ms_anime") {
+        const items = await nyaaSearch(search, skip);
+        const seen = new Set();
+        const metas = [];
+        for (const item of items) {
+          const m = nyaaToMeta(item);
+          if (!seen.has(m.name.toLowerCase())) {
+            seen.add(m.name.toLowerCase());
+            metas.push(m);
+          }
+        }
+        return respond(res, { metas });
+      }
     } catch (e) {
       console.error("Catalog error:", e.message);
       return respond(res, { metas: [] });
     }
+
+    return respond(res, { metas: [] });
   }
 
-  // META  /meta/:type/:id.json
+  // META
   const metaMatch = path.match(/^\/meta\/([^/]+)\/(ms_[^/]+?)\.json$/);
   if (metaMatch) {
     const [, type, id] = metaMatch;
-    const hash = id.replace("ms_", "");
-    try {
-      const url = `https://apibay.org/t.php?h=${hash}`;
-      const r = await axios.get(url, { timeout: 8000 });
-      const t = r.data;
-      if (t && t.info_hash) {
-        const title = cleanTitle(t.name);
-        const year = yearFromName(t.name);
-        return respond(res, {
-          meta: {
-            id,
-            type,
-            name: title || t.name,
-            poster: `https://via.placeholder.com/300x450/1a1a2e/818cf8?text=${encodeURIComponent(title.slice(0,20))}`,
-            description: `${qualityFromName(t.name)} | Seeds: ${t.seeders} | Size: ${sizeStr(t.size)}\n\n${t.name}`,
-            year,
-            genres: []
+
+    if (id.startsWith("ms_eztv_")) {
+      const imdbId = id.replace("ms_eztv_", "");
+      try {
+        const url = `https://eztvx.to/api/get-torrents?imdb_id=${imdbId}&limit=100`;
+        const r = await axios.get(url, { timeout: 8000 });
+        const torrents = r.data?.torrents || [];
+        if (!torrents.length) return respond(res, { meta: { id, type, name: id } });
+        const name = cleanTitle(torrents[0].title || "");
+        const seen = new Set();
+        const videos = [];
+        for (const t of torrents) {
+          const epMatch = t.title?.match(/S(\d+)E(\d+)/i);
+          const epKey = epMatch ? `${epMatch[1]}x${epMatch[2]}` : t.id;
+          if (!seen.has(epKey)) {
+            seen.add(epKey);
+            videos.push({
+              id: `ms_eztv_ep_${t.hash?.toLowerCase() || t.id}`,
+              title: t.title || `Episode`,
+              season: epMatch ? parseInt(epMatch[1]) : 1,
+              episode: epMatch ? parseInt(epMatch[2]) : videos.length + 1,
+              released: t.date_released_unix
+                ? new Date(t.date_released_unix * 1000).toISOString()
+                : new Date().toISOString()
+            });
           }
-        });
+        }
+        return respond(res, { meta: { id, type, name, videos } });
+      } catch (e) {
+        return respond(res, { meta: { id, type, name: id } });
       }
-    } catch (e) {
-      console.error("Meta error:", e.message);
     }
+
+    if (id.startsWith("ms_nyaa_")) {
+      const name = id.replace("ms_nyaa_", "");
+      return respond(res, { meta: { id, type, name, genres: ["Anime"] } });
+    }
+
     return respond(res, { meta: { id, type, name: id } });
   }
 
-  // STREAM  /stream/:type/:id.json
+  // STREAM
   const streamMatch = path.match(/^\/stream\/([^/]+)\/(ms_[^/]+?)\.json$/);
   if (streamMatch) {
     const [, type, id] = streamMatch;
-    const hash = id.replace("ms_", "").toLowerCase();
 
-    try {
-      // Get torrent details
-      const url = `https://apibay.org/t.php?h=${hash}`;
-      const r = await axios.get(url, { timeout: 8000 });
-      const t = r.data;
-      const name = t?.name || hash;
-      const quality = qualityFromName(name);
-      const size = sizeStr(t?.size || 0);
-      const seeds = t?.seeders || "?";
-
+    // EZTV episode stream
+    if (id.startsWith("ms_eztv_ep_")) {
+      const hash = id.replace("ms_eztv_ep_", "").toLowerCase();
       return respond(res, {
         streams: [{
-          name: `MultiStream\n${quality}`,
-          title: `${name}\n💾 ${size} | 🌱 ${seeds} seeds`,
-          infoHash: hash,
-          sources: TRACKERS,
-          behaviorHints: {
-            notWebReady: false,
-            bingeGroup: `ms_${hash}`
-          }
-        }]
-      });
-    } catch (e) {
-      // Fallback — return stream with just hash
-      return respond(res, {
-        streams: [{
-          name: "MultiStream",
-          title: "Stream",
+          name: "MultiStream\nTV",
+          title: "📺 Stream",
           infoHash: hash,
           sources: TRACKERS,
           behaviorHints: { notWebReady: false }
         }]
       });
     }
+
+    // EZTV show — return latest episodes
+    if (id.startsWith("ms_eztv_")) {
+      const imdbId = id.replace("ms_eztv_", "");
+      try {
+        const url = `https://eztvx.to/api/get-torrents?imdb_id=${imdbId}&limit=5`;
+        const r = await axios.get(url, { timeout: 8000 });
+        const torrents = r.data?.torrents || [];
+        const streams = torrents
+          .filter(t => t.hash)
+          .map(t => ({
+            name: `MultiStream\n${qualityFromName(t.title)}`,
+            title: `${t.title}\n🌱 ${t.seeds} seeds | ${sizeStr(t.size_bytes)}`,
+            infoHash: t.hash.toLowerCase(),
+            sources: TRACKERS,
+            behaviorHints: { notWebReady: false }
+          }));
+        return respond(res, { streams });
+      } catch (e) {
+        return respond(res, { streams: [] });
+      }
+    }
+
+    // Nyaa stream
+    if (id.startsWith("ms_nyaa_")) {
+      const hash = id.replace("ms_nyaa_", "").toLowerCase();
+      return respond(res, {
+        streams: [{
+          name: "MultiStream\nAnime",
+          title: "🎌 Nyaa Stream",
+          infoHash: hash,
+          sources: TRACKERS,
+          behaviorHints: { notWebReady: false }
+        }]
+      });
+    }
+
+    return respond(res, { streams: [] });
   }
 
   res.statusCode = 404;
