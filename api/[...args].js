@@ -292,8 +292,13 @@ module.exports = async (req, res) => {
   // STREAM — return ALL matching torrents as separate streams
   const sm = path.match(/^\/stream\/([^/]+)\/([^/]+?)\.json$/);
   if (sm) {
-    const [, type, id] = sm;
-    // Handle both IMDB ids (tt1234567) and ms_ ids
+    const [, type, rawId] = sm;
+    // Handle tt1234567:season:episode format from Stremio native catalog
+    const ttMatch = rawId.match(/^(tt\d+)(?::(\d+):(\d+))?$/);
+    const id = ttMatch ? ttMatch[1] : rawId;
+    const season = ttMatch?.[2] ? parseInt(ttMatch[2]) : null;
+    const episode = ttMatch?.[3] ? parseInt(ttMatch[3]) : null;
+
     const isImdb = id.startsWith("tt");
     const isMsId = id.startsWith("ms_");
     let hash = "";
@@ -308,7 +313,6 @@ module.exports = async (req, res) => {
     } else if (isImdb) {
       // Look up show name from TMDB using IMDB id
       try {
-        const t2 = type === "series" ? "tv" : "movie";
         const findR = await axios.get(
           `https://api.themoviedb.org/3/find/${id}?api_key=${TMDB_KEY}&external_source=imdb_id`,
           { timeout: 5000 }
@@ -342,7 +346,14 @@ module.exports = async (req, res) => {
       // Search for more quality options using title from ID
       if (titleFromId) {
         const cat = type === "movie" ? "207" : "205";
-        const more = await tpbSearch(titleFromId, cat);
+        // Build search query with season/episode if available
+        let searchQ = titleFromId;
+        if (season !== null && episode !== null) {
+          searchQ = `${titleFromId} S${String(season).padStart(2,"0")}E${String(episode).padStart(2,"0")}`;
+        } else if (season !== null) {
+          searchQ = `${titleFromId} S${String(season).padStart(2,"0")}`;
+        }
+        const more = await tpbSearch(searchQ, cat);
         const seen = new Set([hash]);
         const packs = [];   // season packs / full movies (large files, high seeds)
         const singles = []; // single episodes
