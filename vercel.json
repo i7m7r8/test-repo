@@ -1,9 +1,13 @@
 {
   "version": 2,
-  "routes": [
+  "rewrites": [
     {
-      "src": "/(.*)",
-      "dest": "/api/[...args].js"
+      "source": "/tpb/:path*",
+      "destination": "https://apibay.org/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/api/[...args].js"
     }
   ],
   "functions": {
