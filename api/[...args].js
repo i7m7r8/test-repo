@@ -32,9 +32,10 @@ function clean(name) {
   let t = name || "";
   t = t.replace(/\[.*?\]/g, " ");
   t = t.replace(/\(.*?\)/g, " ");
+  t = t.replace(/\s*[|]\s*.*/g, "");
   t = t.replace(/S\d+E\d+.*/i, " ");
   t = t.replace(/\b(19|20)\d{2}\b.*/, "");
-  t = t.replace(/\b(2160p|1080p|720p|480p|4K|UHD|HDR|BluRay|BRRip|WEBRip|WEB-DL|WEB|HDTS|HDCAM|CAMRip|HDTC|DVDSCR|HDTV|DVDRip|x264|x265|HEVC|AAC|DDP|DD5|AC3|ESub|EZTV|YIFY|YTS|Atmos|SDR|10bit|REMUX|REPACK|PROPER|EXTENDED|UNRATED|COMPLETE|SEASON|EPISODE|MULTI|BLURAY)\b.*/gi, "");
+  t = t.replace(/\b(2160p|1080p|720p|480p|4K|UHD|HDR|BluRay|BRRip|WEBRip|WEB-DL|WEB|HDTS|HDCAM|CAMRip|HDTC|DVDSCR|HDTV|DVDRip|x264|x265|HEVC|AAC|DDP|DD5|AC3|ESub|EZTV|YIFY|YTS|Atmos|SDR|10bit|REMUX|REPACK|PROPER|EXTENDED|UNRATED|COMPLETE|SEASON|EPISODE|MULTI|BLURAY|LPCM)\b.*/gi, "");
   t = t.replace(/[-._]+/g, " ");
   t = t.replace(/\s+/g, " ");
   t = t.replace(/[\s,;:\-]+$/, "");
