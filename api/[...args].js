@@ -165,7 +165,8 @@ async function nyaaSearch(q) {
 function buildStreams(results, refHash) {
   const seen = new Set(refHash ? [refHash] : []);
   const packs = [], singles = [];
-  for (const t of results) {
+  const sorted = [...results].sort((a, b) => parseInt(b.seeders) - parseInt(a.seeders));
+  for (const t of sorted) {
     if (!t.info_hash || parseInt(t.seeders) < 1) continue;
     const h = t.info_hash.toLowerCase();
     if (seen.has(h)) continue;
