@@ -17,7 +17,7 @@ const manifest = {
   resources: ["catalog", "stream", "meta"],
   types: ["movie", "series"],
   idPrefixes: ["arch_"],
-  behaviorHints: { adult: false, p2p: false }
+  behaviorHints: { adult: true, p2p: true }
 };
 
 const CATALOG_CONFIG = {
