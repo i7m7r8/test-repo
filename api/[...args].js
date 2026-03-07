@@ -116,13 +116,14 @@ function quality(name) {
 
 function cleanTitle(name) {
   return name
-    .replace(/S\d+E\d+.*/i, "")
-    .replace(/\b(19|20)\d{2}\b.*/, "")
-    .replace(/\b(2160p|1080p|720p|480p|4K|UHD|BluRay|BRRip|WEBRip|WEB-DL|WEB|HDTS|HDCAM|CAMRip|HDTC|DVDSCR|HDTV|DVDRip|x264|x265|HEVC|AAC|DD5\.1|DDP5\.1|DDP|AC3|ESub|EZTV|YIFY|YTS|HDR|Atmos|SDR|10.bit|DarQ|QRips|AMZN|NF|DSNP|MAX|HLG|REMUX|REPACK|PROPER|EXTENDED|UNRATED|DC)\b.*/gi, "")
-    .replace(/\[.*?\]/g, "")
-    .replace(/\(.*?\)/g, "")
-    .replace(/[-._]+/g, " ")
-    .replace(/\s+/g, " ")
+    .replace(/\[.*?\]/g, "")          // remove [tags]
+    .replace(/S\d+E\d+.*/i, "")       // remove episode info
+    .replace(/\b(19|20)\d{2}\b.*/, "") // cut at year
+    .replace(/\b(2160p|1080p|720p|480p|4K|UHD|BluRay|BRRip|WEBRip|WEB[-.]DL|WEB|HDTS|HDCAM|CAMRip|HDTC|DVDSCR|HDTV|DVDRip|x264|x265|HEVC|AAC|DD5\.1|DDP5\.1|DDP|AC3|ESub|EZTV|YIFY|YTS|HDR|Atmos|SDR|10bit|DarQ|QRips|AMZN|NF|DSNP|MAX|HLG|REMUX|REPACK|PROPER|EXTENDED|UNRATED)\b.*/gi, "")
+    .replace(/\(.*?\)/g, "")          // remove (parentheses)
+    .replace(/[-._]+/g, " ")           // dots/dashes to spaces
+    .replace(/\s+/g, " ")             // collapse spaces
+    .replace(/[,;:\s]+$/, "")         // trim trailing punctuation
     .trim();
 }
 
