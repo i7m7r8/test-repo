@@ -1,8 +1,16 @@
 {
-  "name": "stremio-tpb-addon",
+  "name": "archivestream-stremio-addon",
   "version": "1.0.0",
+  "description": "Stremio addon — Movies, TV, Docs from Internet Archive",
+  "main": "api/[...args].js",
+  "scripts": {
+    "start": "node api/[...args].js"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
   "dependencies": {
-    "@stremio-addon/sdk": "^1.6.10",
-    "axios": "^1.6.2"
+    "stremio-addon-sdk": "^1.6.10",
+    "axios": "^1.6.0"
   }
 }
