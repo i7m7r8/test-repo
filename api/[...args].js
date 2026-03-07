@@ -450,10 +450,12 @@ module.exports = async (req, res) => {
         if (r.status !== "fulfilled") continue;
         for (const t of r.value) {
           if (!t.info_hash || seen.has(t.info_hash.toLowerCase())) continue;
-          // Extra safety: result must contain show title words
+          // Safety: result must contain show title (allow partial match for season packs)
           const titleWords = titleQuery.toLowerCase().split(" ").filter(w => w.length > 2);
           const tname = t.name.toLowerCase();
-          if (!titleWords.every(w => tname.includes(w))) continue;
+          const matchCount = titleWords.filter(w => tname.includes(w)).length;
+          // Must match at least half the title words (allows "Legion S01 Complete" to pass)
+          if (matchCount < Math.ceil(titleWords.length * 0.6)) continue;
           seen.add(t.info_hash.toLowerCase());
           merged.push(t);
         }
