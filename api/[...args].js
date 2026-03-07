@@ -73,27 +73,19 @@ async function tpbSearch(query, cat = "0") {
 // ── Nyaa RSS for anime ────────────────────────────────────────
 async function nyaaSearch(query, skip = 0) {
   const page = Math.floor(skip / 20);
-  const url = `https://nyaa.si/?page=rss&q=${encodeURIComponent(query || "anime")}&c=1_0&f=0&p=${page}`;
+  const url = `https://nyaa.si/?page=rss&q=${encodeURIComponent(query || "anime")}&c=1_2&f=0&p=${page}`;
   const r = await axios.get(url, { timeout: 10000, headers: { "User-Agent": "Mozilla/5.0" } });
   const xml = r.data;
   const items = [];
-  // Split by <item>
   const parts = xml.split("<item>");
-  parts.shift(); // remove header
+  parts.shift();
   for (const block of parts) {
-    // title
-    const titleMatch = block.match(/<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/s);
-    const title = titleMatch?.[1]?.trim() || "";
-    // magnet
-    const magnetMatch = block.match(/magnet:\?xt=urn:btih:([a-fA-F0-9]{40})/i);
-    const hash = magnetMatch?.[1]?.toLowerCase() || "";
-    // seeders
-    const seedersMatch = block.match(/<nyaa:seeders>(\d+)<\/nyaa:seeders>/);
-    const seeders = seedersMatch?.[1] || "0";
-    // size
-    const sizeMatch = block.match(/<nyaa:size>(.*?)<\/nyaa:size>/);
-    const size = sizeMatch?.[1] || "";
-    if (title && hash) items.push({ title, hash, seeders, size });
+    const title = block.match(/<title>(.*?)<\/title>/s)?.[1]?.trim() || "";
+    // Nyaa uses <nyaa:infoHash> directly
+    const hash = block.match(/<nyaa:infoHash>([a-fA-F0-9]{40})<\/nyaa:infoHash>/i)?.[1]?.toLowerCase() || "";
+    const seeders = block.match(/<nyaa:seeders>(\d+)<\/nyaa:seeders>/)?.[1] || "0";
+    const size = block.match(/<nyaa:size>(.*?)<\/nyaa:size>/)?.[1] || "";
+    if (title && hash && parseInt(seeders) > 0) items.push({ title, hash, seeders, size });
     if (items.length >= 20) break;
   }
   return items;
