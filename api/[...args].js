@@ -293,9 +293,10 @@ module.exports = async (req, res) => {
   const sm = path.match(/^\/stream\/([^/]+)\/([^/]+?)\.json$/);
   if (sm) {
     const [, type, rawId] = sm;
-    // Handle tt1234567:season:episode format from Stremio native catalog
-    const ttMatch = rawId.match(/^(tt\d+)(?::(\d+):(\d+))?$/);
-    const id = ttMatch ? ttMatch[1] : rawId;
+    // Handle tt1234567:season:episode — colons may be URL-encoded as %3A
+    const decodedId = rawId.replace(/%3A/gi, ":");
+    const ttMatch = decodedId.match(/^(tt\d+)(?::(\d+):(\d+))?$/);
+    const id = ttMatch ? ttMatch[1] : decodedId;
     const season = ttMatch?.[2] ? parseInt(ttMatch[2]) : null;
     const episode = ttMatch?.[3] ? parseInt(ttMatch[3]) : null;
 
