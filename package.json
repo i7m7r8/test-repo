@@ -1,0 +1,8 @@
+{
+  "name": "stremio-tpb-addon",
+  "version": "1.0.0",
+  "dependencies": {
+    "@stremio-addon/sdk": "^1.6.10",
+    "axios": "^1.6.2"
+  }
+}
