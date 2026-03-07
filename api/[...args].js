@@ -3,8 +3,8 @@ const axios = require("axios");
 const TMDB_KEY = "4ef0d7355d9ffb5151e987764708ce96";
 
 const manifest = {
-  id: "community.multistream.v13",
-  version: "13.0.0",
+  id: "community.multistream.v14",
+  version: "14.5.0",
   name: "MultiStream",
   description: "Bollywood, Hollywood, TV Shows & Anime",
   logo: "https://i.imgur.com/uwDqNDd.png",
