@@ -1,10 +1,10 @@
 const axios = require("axios");
 
 const manifest = {
-  id: "community.multistream.v9",
-  version: "9.0.0",
+  id: "community.multistream.v10",
+  version: "10.0.0",
   name: "MultiStream",
-  description: "Bollywood, Hollywood, TV Shows & Anime — powered by torrent search.",
+  description: "Bollywood, Hollywood, TV Shows & Anime",
   logo: "https://i.imgur.com/uwDqNDd.png",
   catalogs: [
     { type: "movie",  id: "ms_hollywood",  name: "🎬 Hollywood",         extra: [{ name: "search" }, { name: "skip" }] },
@@ -27,83 +27,18 @@ const TRACKERS = [
   "tracker:http://nyaa.tracker.wf:7777/announce"
 ];
 
-const QUERIES = {
-  ms_hollywood: "movie 1080p english",
-  ms_bollywood: "hindi 1080p",
-  ms_tvshows:   "season complete 1080p",
-  ms_anime:     "anime 1080p"
-};
-
-const CATS = {
-  ms_hollywood: "207",
-  ms_bollywood: "200",
-  ms_tvshows:   "205",
-  ms_anime:     "205"
-};
-
-// ── apibay via working proxies ────────────────────────────────
-async function tpbSearch(query, cat = "0") {
-  const target = `https://apibay.org/q.php?q=${encodeURIComponent(query)}&cat=${cat}`;
-  const proxies = [
-    `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(target)}`,
-    `http://www.whateverorigin.org/get?url=${encodeURIComponent(target)}`,
-    `https://crossorigin.me/${target}`,
-  ];
-  for (const url of proxies) {
-    try {
-      const r = await axios.get(url, { timeout: 10000, headers: { "User-Agent": "Mozilla/5.0" } });
-      let data = r.data;
-      if (data && typeof data === "object" && data.contents) {
-        try { data = JSON.parse(data.contents); } catch(e) {}
-      }
-      if (data && typeof data === "object" && data.get) {
-        try { data = JSON.parse(data.get); } catch(e) {}
-      }
-      if (typeof data === "string") {
-        try { data = JSON.parse(data); } catch(e) {}
-      }
-      if (Array.isArray(data) && data.length > 0 && data[0].id !== "0") {
-        return data;
-      }
-    } catch(e) { continue; }
-  }
-  return [];
-}
-
-// ── Nyaa RSS for anime ────────────────────────────────────────
-async function nyaaSearch(query, skip = 0) {
-  const page = Math.floor(skip / 20);
-  const url = `https://nyaa.si/?page=rss&q=${encodeURIComponent(query || "anime")}&c=1_2&f=0&p=${page}`;
-  const r = await axios.get(url, { timeout: 10000, headers: { "User-Agent": "Mozilla/5.0" } });
-  const xml = r.data;
-  const items = [];
-  const parts = xml.split("<item>");
-  parts.shift();
-  for (const block of parts) {
-    const title = block.match(/<title>(.*?)<\/title>/s)?.[1]?.trim() || "";
-    // Nyaa uses <nyaa:infoHash> directly
-    const hash = block.match(/<nyaa:infoHash>([a-fA-F0-9]{40})<\/nyaa:infoHash>/i)?.[1]?.toLowerCase() || "";
-    const seeders = block.match(/<nyaa:seeders>(\d+)<\/nyaa:seeders>/)?.[1] || "0";
-    const size = block.match(/<nyaa:size>(.*?)<\/nyaa:size>/)?.[1] || "";
-    if (title && hash && parseInt(seeders) > 0) items.push({ title, hash, seeders, size });
-    if (items.length >= 20) break;
-  }
-  return items;
-}
-
-// ── torrents-csv fallback ─────────────────────────────────────
-async function csvSearch(query) {
-  const url = `https://torrents-csv.com/service/search?size=20&q=${encodeURIComponent(query)}`;
-  const r = await axios.get(url, { timeout: 8000 });
-  return r.data?.torrents || [];
-}
-
-// ── Helpers ───────────────────────────────────────────────────
-function sizeStr(b) {
-  const n = parseInt(b) || 0;
-  if (n > 1073741824) return (n / 1073741824).toFixed(1) + " GB";
-  if (n > 1048576) return (n / 1048576).toFixed(0) + " MB";
-  return n + " B";
+// ── Title cleaner ─────────────────────────────────────────────
+function clean(name) {
+  let t = name || "";
+  t = t.replace(/\[.*?\]/g, " ");
+  t = t.replace(/\(.*?\)/g, " ");
+  t = t.replace(/S\d+E\d+.*/i, " ");
+  t = t.replace(/\b(19|20)\d{2}\b.*/, "");
+  t = t.replace(/\b(2160p|1080p|720p|480p|4K|UHD|HDR|BluRay|BRRip|WEBRip|WEB-DL|WEB|HDTS|HDCAM|CAMRip|HDTC|DVDSCR|HDTV|DVDRip|x264|x265|HEVC|AAC|DDP|DD5|AC3|ESub|EZTV|YIFY|YTS|Atmos|SDR|10bit|REMUX|REPACK|PROPER|EXTENDED|UNRATED|COMPLETE|SEASON|EPISODE|MULTI|BLURAY)\b.*/gi, "");
+  t = t.replace(/[-._]+/g, " ");
+  t = t.replace(/\s+/g, " ");
+  t = t.replace(/[\s,;:\-]+$/, "");
+  return t.trim();
 }
 
 function quality(name) {
@@ -114,23 +49,60 @@ function quality(name) {
   return "SD";
 }
 
-function cleanTitle(name) {
-  return name
-    .replace(/\[.*?\]/g, "")          // remove [tags]
-    .replace(/S\d+E\d+.*/i, "")       // remove episode info
-    .replace(/\b(19|20)\d{2}\b.*/, "") // cut at year
-    .replace(/\b(2160p|1080p|720p|480p|4K|UHD|BluRay|BRRip|WEBRip|WEB[-.]DL|WEB|HDTS|HDCAM|CAMRip|HDTC|DVDSCR|HDTV|DVDRip|x264|x265|HEVC|AAC|DD5\.1|DDP5\.1|DDP|AC3|ESub|EZTV|YIFY|YTS|HDR|Atmos|SDR|10bit|DarQ|QRips|AMZN|NF|DSNP|MAX|HLG|REMUX|REPACK|PROPER|EXTENDED|UNRATED)\b.*/gi, "")
-    .replace(/\(.*?\)/g, "")          // remove (parentheses)
-    .replace(/[-._]+/g, " ")           // dots/dashes to spaces
-    .replace(/\s+/g, " ")             // collapse spaces
-    .replace(/[,;:\s]+$/, "")         // trim trailing punctuation
-    .trim();
+function sizeStr(b) {
+  const n = parseInt(b) || 0;
+  if (n > 1073741824) return (n / 1073741824).toFixed(1) + " GB";
+  if (n > 1048576) return (n / 1048576).toFixed(0) + " MB";
+  return n + " B";
 }
 
-function yearFromName(name) {
-  return name.match(/\b(19|20)\d{2}\b/)?.[0] || "";
+function year(name) {
+  return (name || "").match(/\b(19|20)\d{2}\b/)?.[0] || "";
 }
 
+function poster(title) {
+  const t = encodeURIComponent((title || "?").slice(0, 18));
+  return `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${t}`;
+}
+
+// ── apibay via working proxies ────────────────────────────────
+async function tpbSearch(q, cat) {
+  const target = `https://apibay.org/q.php?q=${encodeURIComponent(q)}&cat=${cat}`;
+  const urls = [
+    `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(target)}`,
+    `http://www.whateverorigin.org/get?url=${encodeURIComponent(target)}`,
+    `https://crossorigin.me/${target}`,
+  ];
+  for (const url of urls) {
+    try {
+      const r = await axios.get(url, { timeout: 10000, headers: { "User-Agent": "Mozilla/5.0" } });
+      let d = r.data;
+      if (d && d.contents) { try { d = JSON.parse(d.contents); } catch(e) {} }
+      if (d && d.get)      { try { d = JSON.parse(d.get); }      catch(e) {} }
+      if (typeof d === "string") { try { d = JSON.parse(d); } catch(e) {} }
+      if (Array.isArray(d) && d.length > 0 && d[0].id !== "0") return d;
+    } catch(e) { continue; }
+  }
+  return [];
+}
+
+// ── Nyaa RSS for anime ────────────────────────────────────────
+async function nyaaSearch(q) {
+  const url = `https://nyaa.si/?page=rss&q=${encodeURIComponent(q || "anime")}&c=1_2&f=0`;
+  const r = await axios.get(url, { timeout: 10000, headers: { "User-Agent": "Mozilla/5.0" } });
+  const items = [];
+  for (const block of r.data.split("<item>").slice(1)) {
+    const title    = block.match(/<title>(.*?)<\/title>/s)?.[1]?.trim() || "";
+    const hash     = block.match(/<nyaa:infoHash>([a-fA-F0-9]{40})<\/nyaa:infoHash>/i)?.[1]?.toLowerCase() || "";
+    const seeders  = block.match(/<nyaa:seeders>(\d+)<\/nyaa:seeders>/)?.[1] || "0";
+    const size     = block.match(/<nyaa:size>(.*?)<\/nyaa:size>/)?.[1] || "";
+    if (title && hash && parseInt(seeders) > 0) items.push({ title, hash, seeders, size });
+    if (items.length >= 20) break;
+  }
+  return items;
+}
+
+// ── Response helper ───────────────────────────────────────────
 function respond(res, data) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Content-Type", "application/json");
@@ -140,148 +112,108 @@ function respond(res, data) {
 function parseExtra(str) {
   const out = {};
   if (!str) return out;
-  str.split("&").forEach(p => {
+  for (const p of str.split("&")) {
     const i = p.indexOf("=");
     if (i > 0) out[decodeURIComponent(p.slice(0, i))] = decodeURIComponent(p.slice(i + 1));
-  });
+  }
   return out;
 }
 
-function tpbToMeta(t, type) {
-  const title = cleanTitle(t.name);
-  return {
-    id: `ms_${t.info_hash.toLowerCase()}`,
-    type,
-    name: title || t.name,
-    poster: `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent((title || "?").slice(0, 15))}`,
-    description: `${quality(t.name)} | 🌱 ${t.seeders} seeds | 💾 ${sizeStr(t.size)}`,
-    year: yearFromName(t.name),
-    genres: []
-  };
-}
-
-function nyaaToMeta(item) {
-  const name = cleanTitle(item.title.replace(/\[.*?\]/g, "").split(" - ")[0].trim());
-  return {
-    id: `ms_${item.hash}`,
-    type: "series",
-    name: name || item.title,
-    poster: `https://via.placeholder.com/300x450/0f0f1a/e879f9?text=${encodeURIComponent((name || "Anime").slice(0, 15))}`,
-    description: `🎌 Anime | 🌱 ${item.seeders} seeds | ${item.size}`,
-    genres: ["Anime"]
-  };
-}
-
-function csvToMeta(t, type) {
-  const title = cleanTitle(t.name || "");
-  return {
-    id: `ms_${t.infohash?.toLowerCase()}`,
-    type,
-    name: title || t.name,
-    poster: `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent((title || "?").slice(0, 15))}`,
-    description: `${quality(t.name)} | 🌱 ${t.seeders} seeds`,
-    year: yearFromName(t.name || ""),
-    genres: []
-  };
-}
-
-// ── Main handler ──────────────────────────────────────────────
+// ── Main ──────────────────────────────────────────────────────
 module.exports = async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
   if (req.method === "OPTIONS") { res.status(200).end(); return; }
 
-  const rawUrl = req.url || "/";
-  const path = rawUrl.split("?")[0];
+  const path = (req.url || "/").split("?")[0];
 
   // MANIFEST
   if (path === "/" || path === "/manifest.json") return respond(res, manifest);
 
   // CATALOG
-  const catMatch = path.match(/^\/catalog\/([^/]+)\/([^/]+?)(?:\/([^/]+?))?\.json$/);
-  if (catMatch) {
-    const [, type, id, extraStr] = catMatch;
+  const cm = path.match(/^\/catalog\/([^/]+)\/([^/]+?)(?:\/([^/]+?))?\.json$/);
+  if (cm) {
+    const [, type, id, extraStr] = cm;
     const extra = parseExtra(extraStr);
     const search = extra.search || "";
-    const skip = parseInt(extra.skip || 0);
-    const cat = CATS[id] || "0";
-    const query = search || QUERIES[id] || "movie";
 
     try {
-      // Anime — use Nyaa
+      // ── Anime via Nyaa
       if (id === "ms_anime") {
-        const items = await nyaaSearch(query, skip);
+        const items = await nyaaSearch(search || "anime 1080p");
         const seen = new Set();
         const metas = [];
         for (const item of items) {
-          const m = nyaaToMeta(item);
-          if (!seen.has(m.name.toLowerCase())) {
-            seen.add(m.name.toLowerCase());
-            metas.push(m);
-          }
+          const name = clean(item.title.replace(/^\[.*?\]\s*/, ""));
+          if (!name || seen.has(name.toLowerCase())) continue;
+          seen.add(name.toLowerCase());
+          metas.push({
+            id: `ms_${item.hash}`,
+            type: "series",
+            name,
+            poster: poster(name),
+            description: `🎌 ${quality(item.title)} | 🌱 ${item.seeders} seeds | ${item.size}`,
+            genres: ["Anime"]
+          });
         }
         return respond(res, { metas });
       }
 
-      // Others — use TPB via proxy, fallback to torrents-csv
-      let results = await tpbSearch(query, cat);
+      // ── Others via apibay
+      const catMap = { ms_hollywood: "207", ms_bollywood: "200", ms_tvshows: "205" };
+      const queryMap = {
+        ms_hollywood: "movie 1080p english",
+        ms_bollywood: "hindi 1080p",
+        ms_tvshows: "season complete 1080p"
+      };
+      const q = search || queryMap[id] || "movie";
+      const cat = catMap[id] || "0";
 
-      if (!results.length) {
-        // fallback to torrents-csv
-        const csvResults = await csvSearch(query);
-        const seen = new Set();
-        const metas = [];
-        for (const t of csvResults) {
-          if (!t.infohash || parseInt(t.seeders) < 1) continue;
-          const m = csvToMeta(t, type);
-          if (!m.id || seen.has(m.name.toLowerCase())) continue;
-          seen.add(m.name.toLowerCase());
-          metas.push(m);
-          if (metas.length >= 20) break;
-        }
-        return respond(res, { metas });
-      }
-
+      const results = await tpbSearch(q, cat);
       const seen = new Set();
       const metas = [];
       for (const t of results) {
         if (!t.info_hash || parseInt(t.seeders) < 1) continue;
-        const m = tpbToMeta(t, type);
-        if (!seen.has(m.name.toLowerCase())) {
-          seen.add(m.name.toLowerCase());
-          metas.push(m);
-        }
+        const name = clean(t.name);
+        if (!name || seen.has(name.toLowerCase())) continue;
+        seen.add(name.toLowerCase());
+        metas.push({
+          id: `ms_${t.info_hash.toLowerCase()}`,
+          type,
+          name,
+          poster: poster(name),
+          description: `${quality(t.name)} | 🌱 ${t.seeders} seeds | 💾 ${sizeStr(t.size)}`,
+          year: year(t.name),
+          genres: []
+        });
         if (metas.length >= 20) break;
       }
       return respond(res, { metas });
 
-    } catch (e) {
-      console.error("Catalog error:", e.message);
+    } catch(e) {
+      console.error(e.message);
       return respond(res, { metas: [] });
     }
   }
 
   // META
-  const metaMatch = path.match(/^\/meta\/([^/]+)\/(ms_[^/]+?)\.json$/);
-  if (metaMatch) {
-    const [, type, id] = metaMatch;
-    const hash = id.replace("ms_", "");
-    // Return basic meta — hash is all we need for streaming
+  const mm = path.match(/^\/meta\/([^/]+)\/(ms_[^/]+?)\.json$/);
+  if (mm) {
+    const [, type, id] = mm;
     return respond(res, {
-      meta: { id, type, name: hash, poster: `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=Loading`, genres: [] }
+      meta: { id, type, name: id.replace("ms_", ""), poster: poster("?"), genres: [] }
     });
   }
 
   // STREAM
-  const streamMatch = path.match(/^\/stream\/([^/]+)\/(ms_[^/]+?)\.json$/);
-  if (streamMatch) {
-    const [, type, id] = streamMatch;
+  const sm = path.match(/^\/stream\/([^/]+)\/(ms_[^/]+?)\.json$/);
+  if (sm) {
+    const [, , id] = sm;
     const hash = id.replace("ms_", "").toLowerCase();
     return respond(res, {
       streams: [{
         name: "MultiStream",
-        title: `⚡ Play\n${hash.slice(0, 8)}...`,
+        title: "⚡ Play",
         infoHash: hash,
         sources: TRACKERS,
         behaviorHints: { notWebReady: false, bingeGroup: `ms_${hash}` }
