@@ -74,15 +74,25 @@ async function tpbSearch(query, cat = "0") {
 async function nyaaSearch(query, skip = 0) {
   const page = Math.floor(skip / 20);
   const url = `https://nyaa.si/?page=rss&q=${encodeURIComponent(query || "anime")}&c=1_0&f=0&p=${page}`;
-  const r = await axios.get(url, { timeout: 10000 });
+  const r = await axios.get(url, { timeout: 10000, headers: { "User-Agent": "Mozilla/5.0" } });
+  const xml = r.data;
   const items = [];
-  for (const m of r.data.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
-    const b = m[1];
-    const title = b.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/)?.[1] || b.match(/<title>(.*?)<\/title>/)?.[1] || "";
-    const magnet = b.match(/<nyaa:magnetURI><!\[CDATA\[(.*?)\]\]><\/nyaa:magnetURI>/)?.[1] || "";
-    const hash = magnet.match(/btih:([a-fA-F0-9]{40})/i)?.[1]?.toLowerCase() || "";
-    const seeders = b.match(/<nyaa:seeders>(.*?)<\/nyaa:seeders>/)?.[1] || "0";
-    const size = b.match(/<nyaa:size>(.*?)<\/nyaa:size>/)?.[1] || "";
+  // Split by <item>
+  const parts = xml.split("<item>");
+  parts.shift(); // remove header
+  for (const block of parts) {
+    // title
+    const titleMatch = block.match(/<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/s);
+    const title = titleMatch?.[1]?.trim() || "";
+    // magnet
+    const magnetMatch = block.match(/magnet:\?xt=urn:btih:([a-fA-F0-9]{40})/i);
+    const hash = magnetMatch?.[1]?.toLowerCase() || "";
+    // seeders
+    const seedersMatch = block.match(/<nyaa:seeders>(\d+)<\/nyaa:seeders>/);
+    const seeders = seedersMatch?.[1] || "0";
+    // size
+    const sizeMatch = block.match(/<nyaa:size>(.*?)<\/nyaa:size>/);
+    const size = sizeMatch?.[1] || "";
     if (title && hash) items.push({ title, hash, seeders, size });
     if (items.length >= 20) break;
   }
@@ -115,8 +125,8 @@ function quality(name) {
 function cleanTitle(name) {
   return name
     .replace(/S\d+E\d+.*/i, "")
-    .replace(/\(?\d{4}\)?/, "")
-    .replace(/2160p|1080p|720p|480p|4K|UHD|BluRay|WEBRip|WEB-DL|HDTV|DVDRip|x264|x265|HEVC|AAC|DD5\.1|ESub|EZTV|YIFY|YTS|HDR|Atmos/gi, "")
+    .replace(/\b(19|20)\d{2}\b.*/, "")
+    .replace(/\b(2160p|1080p|720p|480p|4K|UHD|BluRay|BRRip|WEBRip|WEB-DL|WEB|HDTS|HDCAM|CAMRip|HDTC|DVDSCR|HDTV|DVDRip|x264|x265|HEVC|AAC|DD5\.1|DDP5\.1|DDP|AC3|ESub|EZTV|YIFY|YTS|HDR|Atmos|SDR|10.bit|DarQ|QRips|AMZN|NF|DSNP|MAX|HLG|REMUX|REPACK|PROPER|EXTENDED|UNRATED|DC)\b.*/gi, "")
     .replace(/\[.*?\]/g, "")
     .replace(/\(.*?\)/g, "")
     .replace(/[-._]+/g, " ")
