@@ -192,7 +192,14 @@ function buildStreams(results, refHash) {
     else singles.push(stream);
     if (packs.length + singles.length >= 8) break;
   }
-  return [...packs, ...singles].slice(0, 8);
+  // Singles first (specific episode), then season packs
+  // Also filter >20GB (full season remux - too large to stream)
+  const filtered = [...singles, ...packs].filter(s => {
+    const gbMatch = s.title.match(/([\d.]+) GB/);
+    if (gbMatch && parseFloat(gbMatch[1]) > 20) return false;
+    return true;
+  });
+  return filtered.slice(0, 8);
 }
 
 // ── Main handler ──────────────────────────────────────────────
