@@ -2,7 +2,7 @@ const axios = require("axios");
 
 const manifest = {
   id: "community.multistream.v10",
-  version: "10.0.0",
+  version: "10.0.2",
   name: "MultiStream",
   description: "Bollywood, Hollywood, TV Shows & Anime",
   logo: "https://i.imgur.com/uwDqNDd.png",
@@ -163,9 +163,9 @@ module.exports = async (req, res) => {
       // ── Others via apibay
       const catMap = { ms_hollywood: "207", ms_bollywood: "200", ms_tvshows: "205" };
       const queryMap = {
-        ms_hollywood: "movie 1080p english",
-        ms_bollywood: "hindi 1080p",
-        ms_tvshows: "season complete 1080p"
+        ms_hollywood: "movie",
+        ms_bollywood: "hindi",
+        ms_tvshows: "tv show"
       };
       const q = search || queryMap[id] || "movie";
       const cat = catMap[id] || "0";
