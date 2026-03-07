@@ -426,21 +426,23 @@ module.exports = async (req, res) => {
     let results = [];
 
     if (season !== null && episode !== null) {
-      const epQ      = `${titleQuery} S${String(season).padStart(2,"0")}E${String(episode).padStart(2,"0")}`;
-      const seasonQ  = `${titleQuery} S${String(season).padStart(2,"0")}`;
-      const titleQ   = titleQuery;
-      // Fetch episode, season pack, and title all in parallel
-      const [r1, r2, r3] = await Promise.allSettled([
+      const epQ     = `${titleQuery} S${String(season).padStart(2,"0")}E${String(episode).padStart(2,"0")}`;
+      const seasonQ = `${titleQuery} S${String(season).padStart(2,"0")}`;
+      // Fetch specific episode AND season pack in parallel — no broad title search (too noisy)
+      const [r1, r2] = await Promise.allSettled([
         tpbSearch(epQ, cat),
         tpbSearch(seasonQ, cat),
-        tpbSearch(titleQ, cat),
       ]);
       const seen = new Set();
       const merged = [];
-      for (const r of [r1, r2, r3]) {
+      for (const r of [r1, r2]) {
         if (r.status !== "fulfilled") continue;
         for (const t of r.value) {
           if (!t.info_hash || seen.has(t.info_hash.toLowerCase())) continue;
+          // Extra safety: result must contain show title words
+          const titleWords = titleQuery.toLowerCase().split(" ").filter(w => w.length > 2);
+          const tname = t.name.toLowerCase();
+          if (!titleWords.every(w => tname.includes(w))) continue;
           seen.add(t.info_hash.toLowerCase());
           merged.push(t);
         }
