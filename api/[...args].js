@@ -1,16 +1,16 @@
 const axios = require("axios");
 
 const manifest = {
-  id: "community.multistream.v5",
-  version: "5.0.0",
+  id: "community.multistream.v6",
+  version: "6.0.0",
   name: "MultiStream",
   description: "Bollywood, Hollywood, TV Shows & Anime — massive torrent catalog.",
   logo: "https://i.imgur.com/uwDqNDd.png",
   catalogs: [
-    { type: "movie",  id: "ms_hollywood",  name: "🎬 Hollywood",        extra: [{ name: "search" }, { name: "skip" }] },
+    { type: "movie",  id: "ms_hollywood",  name: "🎬 Hollywood",         extra: [{ name: "search" }, { name: "skip" }] },
     { type: "movie",  id: "ms_bollywood",  name: "🇮🇳 Bollywood & Hindi", extra: [{ name: "search" }, { name: "skip" }] },
-    { type: "series", id: "ms_tvshows",    name: "📺 TV Shows",          extra: [{ name: "search" }, { name: "skip" }] },
-    { type: "series", id: "ms_anime",      name: "🎌 Anime",             extra: [{ name: "search" }, { name: "skip" }] }
+    { type: "series", id: "ms_tvshows",    name: "📺 TV Shows",           extra: [{ name: "search" }, { name: "skip" }] },
+    { type: "series", id: "ms_anime",      name: "🎌 Anime",              extra: [{ name: "search" }, { name: "skip" }] }
   ],
   resources: ["catalog", "stream", "meta"],
   types: ["movie", "series"],
@@ -23,30 +23,8 @@ const TRACKERS = [
   "tracker:udp://tracker.openbittorrent.com:80",
   "tracker:udp://tracker.coppersurfer.tk:6969",
   "tracker:udp://tracker.opentrackr.org:1337/announce",
-  "tracker:udp://tracker.leechers-paradise.org:6969",
-  "tracker:http://nyaa.tracker.wf:7777/announce"
+  "tracker:udp://tracker.leechers-paradise.org:6969"
 ];
-
-// Multiple apibay mirrors — tries each until one works
-const TPB_MIRRORS = [
-  "https://apibay.org",
-  "https://piratebay.live",
-  "https://thepiratebay.org",
-];
-
-async function tpbFetch(path) {
-  for (const mirror of TPB_MIRRORS) {
-    try {
-      const res = await axios.get(mirror + path, { timeout: 8000 });
-      if (Array.isArray(res.data) && res.data.length > 0 && res.data[0].id !== "0") {
-        return res.data;
-      }
-    } catch (e) {
-      continue;
-    }
-  }
-  return [];
-}
 
 const QUERIES = {
   ms_hollywood: "movie 1080p english",
@@ -61,6 +39,60 @@ const CATS = {
   ms_tvshows:   "205",
   ms_anime:     "205"
 };
+
+// Try direct + multiple proxy methods
+async function tpbFetch(apiPath) {
+  const targetUrl = "https://apibay.org" + apiPath;
+
+  const attempts = [
+    // 1. Direct
+    () => axios.get(targetUrl, { timeout: 8000 }),
+
+    // 2. allorigins proxy
+    () => axios.get(
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
+      { timeout: 10000 }
+    ),
+
+    // 3. corsproxy.io
+    () => axios.get(
+      `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
+      { timeout: 10000 }
+    ),
+
+    // 4. jsonp.afeld.me
+    () => axios.get(
+      `https://jsonp.afeld.me/?url=${encodeURIComponent(targetUrl)}`,
+      { timeout: 10000 }
+    ),
+
+    // 5. thingproxy
+    () => axios.get(
+      `https://thingproxy.freeboard.io/fetch/${targetUrl}`,
+      { timeout: 10000 }
+    ),
+  ];
+
+  for (const attempt of attempts) {
+    try {
+      const res = await attempt();
+      let data = res.data;
+      // allorigins wraps in {contents: "..."}
+      if (data && typeof data === "object" && data.contents) {
+        data = JSON.parse(data.contents);
+      }
+      if (typeof data === "string") {
+        data = JSON.parse(data);
+      }
+      if (Array.isArray(data) && data.length > 0 && data[0].id !== "0") {
+        return data;
+      }
+    } catch (e) {
+      continue;
+    }
+  }
+  return [];
+}
 
 function sizeStr(b) {
   const n = parseInt(b) || 0;
@@ -123,14 +155,36 @@ module.exports = async (req, res) => {
     return respond(res, manifest);
   }
 
+  // DEBUG — test all proxy methods
+  if (path === "/debug") {
+    const targetUrl = "https://apibay.org/q.php?q=batman&cat=207";
+    const tests = [
+      { name: "direct",       url: targetUrl },
+      { name: "allorigins",   url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}` },
+      { name: "corsproxy.io", url: `https://corsproxy.io/?${encodeURIComponent(targetUrl)}` },
+      { name: "thingproxy",   url: `https://thingproxy.freeboard.io/fetch/${targetUrl}` },
+    ];
+    const results = [];
+    for (const t of tests) {
+      try {
+        const r = await axios.get(t.url, { timeout: 8000 });
+        let data = r.data;
+        if (data?.contents) data = JSON.parse(data.contents);
+        if (typeof data === "string") data = JSON.parse(data);
+        results.push({ name: t.name, status: "OK", count: Array.isArray(data) ? data.length : 0, sample: Array.isArray(data) ? data[0]?.name : null });
+      } catch (e) {
+        results.push({ name: t.name, status: "FAIL", error: e.message });
+      }
+    }
+    return respond(res, { results });
+  }
+
   // CATALOG
   const catMatch = path.match(/^\/catalog\/([^/]+)\/([^/]+?)(?:\/([^/]+?))?\.json$/);
   if (catMatch) {
     const [, type, id, extraStr] = catMatch;
     const extra = parseExtra(extraStr);
     const search = extra.search || "";
-    const skip = parseInt(extra.skip || 0);
-    const page = Math.floor(skip / 20);
     const cat = CATS[id] || "0";
     const query = search || QUERIES[id] || "movie";
 
@@ -139,7 +193,7 @@ module.exports = async (req, res) => {
       const seen = new Set();
       const metas = [];
       for (const t of results) {
-        if (!t.info_hash || t.seeders === "0" || parseInt(t.seeders) < 1) continue;
+        if (!t.info_hash || parseInt(t.seeders) < 1) continue;
         const title = cleanTitle(t.name);
         if (!title || seen.has(title.toLowerCase())) continue;
         seen.add(title.toLowerCase());
@@ -156,7 +210,6 @@ module.exports = async (req, res) => {
       }
       return respond(res, { metas });
     } catch (e) {
-      console.error("Catalog error:", e.message);
       return respond(res, { metas: [] });
     }
   }
@@ -176,7 +229,7 @@ module.exports = async (req, res) => {
             id, type,
             name: title,
             poster: `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent(title.slice(0, 15))}`,
-            description: `${quality(t.name)} | 🌱 ${t.seeders} seeds | 💾 ${sizeStr(t.size)}\n\nOriginal: ${t.name}`,
+            description: `${quality(t.name)} | 🌱 ${t.seeders} seeds | 💾 ${sizeStr(t.size)}\n\n${t.name}`,
             year: yearFromName(t.name),
             genres: []
           }
