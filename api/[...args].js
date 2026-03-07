@@ -270,9 +270,17 @@ module.exports = async (req, res) => {
         for (const t of more) {
           if (!t.info_hash || seen.has(t.info_hash.toLowerCase()) || parseInt(t.seeders) < 1) continue;
           seen.add(t.info_hash.toLowerCase());
+          const q = quality(t.name);
+          const sz = sizeStr(t.size);
+          const sd = parseInt(t.seeders);
+          // Skip tiny files (single eps under 100MB - usually bad quality)
+          if (parseInt(t.size) < 100 * 1024 * 1024 && type !== "series") continue;
+          // Extract season/ep info
+          const epMatch = t.name.match(/S(\d+)(?:E(\d+))?/i);
+          const epInfo = epMatch ? ` S${epMatch[1]}${epMatch[2] ? "E"+epMatch[2] : ""}` : "";
           streams.push({
-            name: `MultiStream\n${quality(t.name)}`,
-            title: `${clean(t.name)}\n💾 ${sizeStr(t.size)} | 🌱 ${t.seeders} seeds`,
+            name: `MultiStream\n${q}`,
+            title: `${clean(t.name)}${epInfo}\n💾 ${sz} | 🌱 ${sd} seeds`,
             infoHash: t.info_hash.toLowerCase(),
             sources: TRACKERS,
             behaviorHints: { notWebReady: false, bingeGroup: `ms_${hash}` }
