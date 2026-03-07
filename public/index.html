@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ArchiveStream — Free Stremio Addon</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{background:#0a0a0f;color:#fff;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px}
+    .card{background:#12121a;border:1px solid #1e1e2e;border-radius:24px;padding:48px 40px;max-width:560px;width:100%;text-align:center;box-shadow:0 24px 80px rgba(0,0,0,0.6)}
+    .logo{width:90px;height:90px;background:linear-gradient(135deg,#6366f1,#8b5cf6,#d946ef);border-radius:24px;margin:0 auto 28px;display:flex;align-items:center;justify-content:center;font-size:40px;box-shadow:0 8px 32px rgba(99,102,241,0.4)}
+    h1{font-size:32px;font-weight:800;margin-bottom:6px;background:linear-gradient(135deg,#818cf8,#c084fc,#e879f9);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .tagline{font-size:14px;color:#4b4b6b;margin-bottom:28px;letter-spacing:1px;text-transform:uppercase}
+    .description{font-size:15px;color:#9090b0;line-height:1.7;margin-bottom:32px}
+    .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:32px}
+    .stat{background:#1a1a28;border:1px solid #2a2a40;border-radius:14px;padding:16px 10px}
+    .stat .num{font-size:22px;font-weight:800;background:linear-gradient(135deg,#818cf8,#e879f9);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .stat .lbl{font-size:11px;color:#555;margin-top:4px;text-transform:uppercase;letter-spacing:0.5px}
+    .install-btn{display:block;width:100%;padding:18px;background:linear-gradient(135deg,#6366f1,#8b5cf6,#d946ef);color:white;text-decoration:none;border-radius:14px;font-size:18px;font-weight:700;margin-bottom:16px;transition:all 0.2s;cursor:pointer;border:none;letter-spacing:0.3px;box-shadow:0 8px 24px rgba(99,102,241,0.35)}
+    .install-btn:hover{opacity:0.92;transform:translateY(-2px)}
+    .manifest-box{background:#1a1a28;border:1px solid #2a2a40;border-radius:12px;padding:14px 16px;font-size:13px;color:#888;display:flex;align-items:center;gap:10px;text-align:left;margin-bottom:28px}
+    .manifest-url{flex:1;font-family:monospace;color:#aaa;word-break:break-all;font-size:12px}
+    .copy-btn{background:#2a2a40;border:none;color:#fff;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px;white-space:nowrap}
+    .copy-btn.copied{background:#22c55e}
+    hr{border:none;border-top:1px solid #1e1e2e;margin:0 0 24px}
+    .catalogs{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:28px;text-align:left}
+    .catalog{background:#1a1a28;border:1px solid #2a2a40;border-radius:12px;padding:14px}
+    .catalog .icon{font-size:22px;margin-bottom:6px}
+    .catalog .name{font-size:13px;font-weight:600;color:#ddd}
+    .catalog .desc{font-size:11px;color:#555;margin-top:3px}
+    .footer{font-size:12px;color:#333;margin-top:8px}
+    .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(100px);background:#22c55e;color:white;padding:12px 28px;border-radius:12px;font-size:14px;font-weight:700;transition:transform 0.3s ease;z-index:999}
+    .toast.show{transform:translateX(-50%) translateY(0)}
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">🎬</div>
+  <h1>ArchiveStream</h1>
+  <div class="tagline">Free • Legal • Massive Collection</div>
+  <p class="description">Your all-in-one free legal Stremio addon. Thousands of movies, TV shows, documentaries, classics and more — directly from Internet Archive. No account, no cost, no hassle.</p>
+  <div class="stats">
+    <div class="stat"><div class="num">20M+</div><div class="lbl">Items</div></div>
+    <div class="stat"><div class="num">6</div><div class="lbl">Catalogs</div></div>
+    <div class="stat"><div class="num">100%</div><div class="lbl">Free</div></div>
+  </div>
+  <div class="catalogs">
+    <div class="catalog"><div class="icon">🎬</div><div class="name">Archive Movies</div><div class="desc">Thousands of free movies</div></div>
+    <div class="catalog"><div class="icon">🎥</div><div class="name">Classic Cinema</div><div class="desc">Golden age Hollywood</div></div>
+    <div class="catalog"><div class="icon">🇮🇳</div><div class="name">Bollywood & Indian</div><div class="desc">Hindi & Indian films</div></div>
+    <div class="catalog"><div class="icon">📺</div><div class="name">TV Shows</div><div class="desc">Series & episodes</div></div>
+    <div class="catalog"><div class="icon">📽️</div><div class="name">Documentaries</div><div class="desc">Nature, history, science</div></div>
+    <div class="catalog"><div class="icon">🎞️</div><div class="name">Short Films</div><div class="desc">Animations & shorts</div></div>
+  </div>
+  <a class="install-btn" id="installBtn" href="#">⚡ Install in Stremio — One Click</a>
+  <div class="manifest-box">
+    <div class="manifest-url" id="manifestUrl">Loading...</div>
+    <button class="copy-btn" id="copyBtn" onclick="copyUrl()">Copy</button>
+  </div>
+  <hr/>
+  <div style="font-size:13px;color:#555;line-height:2">
+    <b style="color:#888">Manual install:</b><br/>
+    Stremio → Search → Addons → Paste URL → Enter
+  </div>
+  <div class="footer" style="margin-top:20px">Powered by Internet Archive • 100% Legal • Open Source</div>
+</div>
+<div class="toast" id="toast">✅ Copied!</div>
+<script>
+  const host = window.location.origin;
+  const manifestUrl = `${host}/manifest.json`;
+  const oneClick = `stremio://${window.location.host}/manifest.json`;
+  document.getElementById("manifestUrl").textContent = manifestUrl;
+  document.getElementById("installBtn").href = oneClick;
+  function copyUrl() {
+    navigator.clipboard.writeText(manifestUrl).then(() => {
+      const btn = document.getElementById("copyBtn");
+      btn.textContent = "Copied!";
+      btn.classList.add("copied");
+      setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("copied"); }, 2000);
+      const t = document.getElementById("toast");
+      t.classList.add("show");
+      setTimeout(() => t.classList.remove("show"), 2500);
+    });
+  }
+</script>
+</body>
+</html>
