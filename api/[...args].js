@@ -192,14 +192,18 @@ function buildStreams(results, refHash) {
     else singles.push(stream);
     if (packs.length + singles.length >= 8) break;
   }
-  // Singles first (specific episode), then season packs
-  // Also filter >20GB (full season remux - too large to stream)
-  const filtered = [...singles, ...packs].filter(s => {
-    const gbMatch = s.title.match(/([\d.]+) GB/);
-    if (gbMatch && parseFloat(gbMatch[1]) > 20) return false;
-    return true;
+  // Singles (specific episodes) first, packs after
+  // Filter: skip anything over 10GB (season remux packs - unplayable on mobile)
+  const MAX_BYTES = 10 * 1024 * 1024 * 1024; // 10 GB
+  const allResults = [...singles, ...packs];
+  const filtered = allResults.filter(s => {
+    const rawSize = parseInt(s._size || 0);
+    return rawSize === 0 || rawSize <= MAX_BYTES;
   });
-  return filtered.slice(0, 8);
+  // If nothing left after filter, return at least singles
+  const final = filtered.length > 0 ? filtered : singles;
+  final.forEach(s => delete s._size);
+  return final.slice(0, 8);
 }
 
 // ── Main handler ──────────────────────────────────────────────
