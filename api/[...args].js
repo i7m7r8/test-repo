@@ -3,8 +3,8 @@ const axios = require("axios");
 const TMDB_KEY = "4ef0d7355d9ffb5151e987764708ce96";
 
 const manifest = {
-  id: "community.multistream.v11",
-  version: "11.0.0",
+  id: "community.multistream.v13",
+  version: "13.0.0",
   name: "MultiStream",
   description: "Bollywood, Hollywood, TV Shows & Anime",
   logo: "https://i.imgur.com/uwDqNDd.png",
@@ -16,7 +16,7 @@ const manifest = {
   ],
   resources: ["catalog", "stream", "meta"],
   types: ["movie", "series"],
-  idPrefixes: ["ms_"],
+  idPrefixes: ["ms_", "tt"],
   behaviorHints: { adult: true, p2p: true }
 };
 
@@ -31,7 +31,7 @@ const TRACKERS = [
   "tracker:udp://tracker.torrent.eu.org:451/announce"
 ];
 
-// ── Title cleaner ─────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────
 function clean(name) {
   let t = name || "";
   t = t.replace(/\[.*?\]/g, " ");
@@ -61,46 +61,67 @@ function sizeStr(b) {
   return n + " B";
 }
 
-function year(name) {
-  return (name || "").match(/\b(19|20)\d{2}\b/)?.[0] || "";
+function respond(res, data) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify(data));
 }
 
-// ── TMDB search: returns { poster, imdbId, name, year, description } ──
+function parseExtra(str) {
+  const out = {};
+  if (!str) return out;
+  for (const p of str.split("&")) {
+    const i = p.indexOf("=");
+    if (i > 0) out[decodeURIComponent(p.slice(0, i))] = decodeURIComponent(p.slice(i + 1));
+  }
+  return out;
+}
+
+// ── TMDB ──────────────────────────────────────────────────────
 async function tmdbSearch(title, type) {
   try {
     const t = type === "series" ? "tv" : "movie";
     const r = await axios.get(
-      `https://api.themoviedb.org/3/search/${t}?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}&page=1`,
+      `https://api.themoviedb.org/3/search/${t}?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}`,
       { timeout: 5000 }
     );
-    const result = r.data?.results?.[0];
-    if (!result) return null;
-    const poster = result.poster_path ? `https://image.tmdb.org/t/p/w300${result.poster_path}` : null;
-    const bg = result.backdrop_path ? `https://image.tmdb.org/t/p/w780${result.backdrop_path}` : null;
-    // Fetch IMDB id
+    const res = r.data?.results?.[0];
+    if (!res) return null;
     let imdbId = null;
     try {
       const ext = await axios.get(
-        `https://api.themoviedb.org/3/${t}/${result.id}/external_ids?api_key=${TMDB_KEY}`,
+        `https://api.themoviedb.org/3/${t}/${res.id}/external_ids?api_key=${TMDB_KEY}`,
         { timeout: 5000 }
       );
       imdbId = ext.data?.imdb_id || null;
     } catch(e) {}
     return {
-      poster,
-      bg,
       imdbId,
-      name: result.title || result.name || title,
-      year: (result.release_date || result.first_air_date || "").slice(0, 4),
-      description: result.overview || ""
+      name: res.title || res.name || title,
+      poster: res.poster_path ? `https://image.tmdb.org/t/p/w300${res.poster_path}` : null,
+      bg: res.backdrop_path ? `https://image.tmdb.org/t/p/w780${res.backdrop_path}` : null,
+      year: (res.release_date || res.first_air_date || "").slice(0, 4),
+      description: res.overview || ""
     };
-  } catch(e) {}
-  return null;
+  } catch(e) { return null; }
 }
 
-async function getTmdbPoster(title, type) {
-  const r = await tmdbSearch(title, type);
-  return r?.poster || `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent(title.slice(0, 15))}`;
+async function tmdbFindByImdb(imdbId) {
+  try {
+    const r = await axios.get(
+      `https://api.themoviedb.org/3/find/${imdbId}?api_key=${TMDB_KEY}&external_source=imdb_id`,
+      { timeout: 5000 }
+    );
+    const found = r.data?.movie_results?.[0] || r.data?.tv_results?.[0];
+    if (!found) return null;
+    return {
+      name: found.title || found.name || imdbId,
+      poster: found.poster_path ? `https://image.tmdb.org/t/p/w300${found.poster_path}` : null,
+      bg: found.backdrop_path ? `https://image.tmdb.org/t/p/w780${found.backdrop_path}` : null,
+      year: (found.release_date || found.first_air_date || "").slice(0, 4),
+      description: found.overview || ""
+    };
+  } catch(e) { return null; }
 }
 
 // ── apibay via proxies ────────────────────────────────────────
@@ -124,7 +145,7 @@ async function tpbSearch(q, cat) {
   return [];
 }
 
-// ── Nyaa RSS for anime ────────────────────────────────────────
+// ── Nyaa RSS ──────────────────────────────────────────────────
 async function nyaaSearch(q) {
   const url = `https://nyaa.si/?page=rss&q=${encodeURIComponent(q || "anime")}&c=1_2&f=0`;
   const r = await axios.get(url, { timeout: 10000, headers: { "User-Agent": "Mozilla/5.0" } });
@@ -140,24 +161,36 @@ async function nyaaSearch(q) {
   return items;
 }
 
-// ── Response helper ───────────────────────────────────────────
-function respond(res, data) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Content-Type", "application/json");
-  res.end(JSON.stringify(data));
-}
-
-function parseExtra(str) {
-  const out = {};
-  if (!str) return out;
-  for (const p of str.split("&")) {
-    const i = p.indexOf("=");
-    if (i > 0) out[decodeURIComponent(p.slice(0, i))] = decodeURIComponent(p.slice(i + 1));
+// ── Build streams from TPB results ───────────────────────────
+function buildStreams(results, refHash) {
+  const seen = new Set(refHash ? [refHash] : []);
+  const packs = [], singles = [];
+  for (const t of results) {
+    if (!t.info_hash || parseInt(t.seeders) < 1) continue;
+    const h = t.info_hash.toLowerCase();
+    if (seen.has(h)) continue;
+    seen.add(h);
+    const q = quality(t.name);
+    const sz = sizeStr(t.size);
+    const sd = t.seeders;
+    const epMatch = t.name.match(/S(\d+)(?:E(\d+))?/i);
+    const isSeasonPack = epMatch && !epMatch[2];
+    const epInfo = epMatch ? ` S${epMatch[1]}${epMatch[2] ? "E" + epMatch[2] : " Full Season"}` : "";
+    const stream = {
+      name: `MultiStream\n${q}`,
+      title: `${clean(t.name)}${epInfo}\n💾 ${sz} | 🌱 ${sd} seeds`,
+      infoHash: h,
+      sources: TRACKERS,
+      behaviorHints: { notWebReady: false }
+    };
+    if (isSeasonPack) packs.push(stream);
+    else singles.push(stream);
+    if (packs.length + singles.length >= 8) break;
   }
-  return out;
+  return [...packs, ...singles].slice(0, 8);
 }
 
-// ── Main ──────────────────────────────────────────────────────
+// ── Main handler ──────────────────────────────────────────────
 module.exports = async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
@@ -174,8 +207,8 @@ module.exports = async (req, res) => {
     const [, type, id, extraStr] = cm;
     const extra = parseExtra(extraStr);
     const search = extra.search || "";
-
     try {
+      // Anime via Nyaa
       if (id === "ms_anime") {
         const items = await nyaaSearch(search || "anime 1080p");
         const seen = new Set();
@@ -187,9 +220,8 @@ module.exports = async (req, res) => {
           const encodedName = encodeURIComponent(name).replace(/%/g, "_");
           metas.push({
             id: `ms_${item.hash}_${encodedName}`,
-            type: "series",
-            name,
-            poster: `https://via.placeholder.com/300x450/0f0f1a/e879f9?text=${encodeURIComponent(name.slice(0, 15))}`,
+            type: "series", name,
+            poster: `https://via.placeholder.com/300x450/0f0f1a/e879f9?text=${encodeURIComponent(name.slice(0,15))}`,
             description: `🎌 ${quality(item.title)} | 🌱 ${item.seeders} seeds | ${item.size}`,
             genres: ["Anime"]
           });
@@ -197,11 +229,11 @@ module.exports = async (req, res) => {
         return respond(res, { metas });
       }
 
+      // Movies/TV via apibay
       const catMap   = { ms_hollywood: "207", ms_bollywood: "200", ms_tvshows: "205" };
       const queryMap = { ms_hollywood: "movie", ms_bollywood: "hindi", ms_tvshows: "tv show" };
       const q   = search || queryMap[id] || "movie";
       const cat = catMap[id] || "0";
-
       const results = await tpbSearch(q, cat);
       const seen = new Set();
       const metas = [];
@@ -210,35 +242,25 @@ module.exports = async (req, res) => {
         const name = clean(t.name);
         if (!name || seen.has(name.toLowerCase())) continue;
         seen.add(name.toLowerCase());
-        // Try TMDB for poster and IMDB id
-        let poster = `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent(name.slice(0,15))}`;
+        // Try TMDB for IMDB id + poster
         let metaId = `ms_${t.info_hash.toLowerCase()}_${encodeURIComponent(name).replace(/%/g,"_")}`;
-        let metaYear = year(t.name);
+        let poster = `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent(name.slice(0,15))}`;
         let desc = `${quality(t.name)} | 🌱 ${t.seeders} seeds | 💾 ${sizeStr(t.size)}`;
+        let yr = (t.name.match(/\b(19|20)\d{2}\b/) || [])[0] || "";
         try {
           const tmdb = await tmdbSearch(name, type);
           if (tmdb) {
+            if (tmdb.imdbId) metaId = tmdb.imdbId;
             if (tmdb.poster) poster = tmdb.poster;
-            if (tmdb.imdbId) metaId = tmdb.imdbId; // use IMDB id for proper Stremio navigation!
-            if (tmdb.year) metaYear = tmdb.year;
             if (tmdb.description) desc = tmdb.description;
+            if (tmdb.year) yr = tmdb.year;
           }
         } catch(e) {}
-        metas.push({
-          id: metaId,
-          type,
-          name,
-          poster,
-          description: desc,
-          year: metaYear,
-          genres: []
-        });
+        metas.push({ id: metaId, type, name, poster, description: desc, year: yr, genres: [] });
         if (metas.length >= 20) break;
       }
       return respond(res, { metas });
-
     } catch(e) {
-      console.error(e.message);
       return respond(res, { metas: [] });
     }
   }
@@ -247,156 +269,87 @@ module.exports = async (req, res) => {
   const mm = path.match(/^\/meta\/([^/]+)\/([^/]+?)\.json$/);
   if (mm) {
     const [, type, id] = mm;
-
-    // IMDB id — fetch from TMDB
     if (id.startsWith("tt")) {
-      try {
-        const t2 = type === "series" ? "tv" : "movie";
-        const findR = await axios.get(
-          `https://api.themoviedb.org/3/find/${id}?api_key=${TMDB_KEY}&external_source=imdb_id`,
-          { timeout: 5000 }
-        );
-        const found = findR.data?.movie_results?.[0] || findR.data?.tv_results?.[0];
-        if (found) {
-          const poster = found.poster_path ? `https://image.tmdb.org/t/p/w300${found.poster_path}` : null;
-          const bg = found.backdrop_path ? `https://image.tmdb.org/t/p/w780${found.backdrop_path}` : null;
-          const name = found.title || found.name || id;
-          return respond(res, {
-            meta: {
-              id, type, name,
-              poster: poster || `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent(name.slice(0,15))}`,
-              background: bg || poster,
-              description: found.overview || name,
-              year: (found.release_date || found.first_air_date || "").slice(0,4),
-              genres: []
-            }
-          });
-        }
-      } catch(e) {}
+      const info = await tmdbFindByImdb(id);
+      if (info) {
+        return respond(res, { meta: {
+          id, type, name: info.name,
+          poster: info.poster || `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent(info.name.slice(0,15))}`,
+          background: info.bg || info.poster,
+          description: info.description, year: info.year, genres: []
+        }});
+      }
     }
-
-    // ms_ id — extract from encoded title
     const parts = id.replace("ms_", "").split("_");
-    const hash = parts[0];
     const name = parts.length > 1
       ? decodeURIComponent(parts.slice(1).join("_").replace(/_/g, "%"))
-      : hash.slice(0, 12);
-    const posterUrl = name.length > 5
-      ? await getTmdbPoster(name, type)
-      : `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=Loading`;
-    return respond(res, {
-      meta: { id, type, name, poster: posterUrl, background: posterUrl, description: name, genres: [] }
-    });
+      : parts[0].slice(0, 12);
+    const tmdb = await tmdbSearch(name, type).catch(() => null);
+    return respond(res, { meta: {
+      id, type, name: tmdb?.name || name,
+      poster: tmdb?.poster || `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent(name.slice(0,15))}`,
+      background: tmdb?.bg || tmdb?.poster,
+      description: tmdb?.description || name, year: tmdb?.year || "", genres: []
+    }});
   }
 
-  // STREAM — return ALL matching torrents as separate streams
+  // STREAM
   const sm = path.match(/^\/stream\/([^/]+)\/([^/]+?)\.json$/);
   if (sm) {
     const [, type, rawId] = sm;
-    // Handle tt1234567:season:episode — colons may be URL-encoded as %3A
-    const decodedId = rawId.replace(/%3A/gi, ":");
-    const ttMatch = decodedId.match(/^(tt\d+)(?::(\d+):(\d+))?$/);
-    const id = ttMatch ? ttMatch[1] : decodedId;
-    const season = ttMatch?.[2] ? parseInt(ttMatch[2]) : null;
-    const episode = ttMatch?.[3] ? parseInt(ttMatch[3]) : null;
+    // Decode %3A → : for episode ids like tt0455275%3A1%3A1
+    const decoded = decodeURIComponent(rawId);
+    const ttMatch = decoded.match(/^(tt\d+)(?::(\d+):(\d+))?$/);
+    const isMsId  = decoded.startsWith("ms_");
 
-    const isImdb = id.startsWith("tt");
-    const isMsId = id.startsWith("ms_");
-    let hash = "";
-    let titleFromId = "";
+    let titleQuery = "";
+    let season = null, episode = null;
+    let refHash = "";
 
-    if (isMsId) {
-      const parts = id.replace("ms_", "").split("_");
-      hash = parts[0];
-      titleFromId = parts.length > 1
+    if (ttMatch) {
+      // IMDB id — look up title from TMDB
+      const imdbId = ttMatch[1];
+      season  = ttMatch[2] ? parseInt(ttMatch[2]) : null;
+      episode = ttMatch[3] ? parseInt(ttMatch[3]) : null;
+      try {
+        const info = await tmdbFindByImdb(imdbId);
+        titleQuery = info?.name || "";
+      } catch(e) {}
+    } else if (isMsId) {
+      const parts = decoded.replace("ms_", "").split("_");
+      refHash = parts[0];
+      titleQuery = parts.length > 1
         ? decodeURIComponent(parts.slice(1).join("_").replace(/_/g, "%"))
         : "";
-    } else if (isImdb) {
-      // Look up show name from TMDB using IMDB id
-      try {
-        const findR = await axios.get(
-          `https://api.themoviedb.org/3/find/${id}?api_key=${TMDB_KEY}&external_source=imdb_id`,
-          { timeout: 5000 }
-        );
-        const found = findR.data?.movie_results?.[0] || findR.data?.tv_results?.[0];
-        titleFromId = found?.title || found?.name || "";
-      } catch(e) {}
     }
 
-    // Get the title from meta to search for more torrents
-    let streams = [];
-
-    try {
-      // Extract title from ID: ms_HASH_ENCODEDTITLE
-      const idParts = id.replace("ms_", "").split("_");
-      const titleFromId = idParts.length > 1
-        ? decodeURIComponent(idParts.slice(1).join("_").replace(/_/g, "%"))
-        : "";
-
-      // First stream: the direct hash
-      if (hash) {
-        streams.push({
-          name: `MultiStream`,
-          title: `${titleFromId || "⚡ Play"}\n🔍 Searching...`,
-          infoHash: hash,
-          sources: TRACKERS,
-          behaviorHints: { notWebReady: false, bingeGroup: `ms_${hash}` }
-        });
-      }
-
-      // Search for more quality options using title from ID
-      if (titleFromId) {
-        const cat = type === "movie" ? "207" : "205";
-        // Build search query with season/episode if available
-        let searchQ = titleFromId;
-        if (season !== null && episode !== null) {
-          searchQ = `${titleFromId} S${String(season).padStart(2,"0")}E${String(episode).padStart(2,"0")}`;
-        } else if (season !== null) {
-          searchQ = `${titleFromId} S${String(season).padStart(2,"0")}`;
-        }
-        const more = await tpbSearch(searchQ, cat);
-        const seen = new Set([hash]);
-        const packs = [];   // season packs / full movies (large files, high seeds)
-        const singles = []; // single episodes
-
-        for (const t of more) {
-          if (!t.info_hash || seen.has(t.info_hash.toLowerCase()) || parseInt(t.seeders) < 1) continue;
-          seen.add(t.info_hash.toLowerCase());
-          const q = quality(t.name);
-          const sz = sizeStr(t.size);
-          const sd = parseInt(t.seeders);
-          const epMatch = t.name.match(/S(\d+)(?:E(\d+))?/i);
-          const isSeasonPack = epMatch && !epMatch[2]; // S01 but no E01
-          const isSingleEp = epMatch && epMatch[2];
-          const epInfo = epMatch ? ` S${epMatch[1]}${epMatch[2] ? "E"+epMatch[2] : " (Full Season)"}` : "";
-          const stream = {
-            name: `MultiStream\n${q}`,
-            title: `${clean(t.name)}${epInfo}\n💾 ${sz} | 🌱 ${sd} seeds`,
-            infoHash: t.info_hash.toLowerCase(),
-            sources: TRACKERS,
-            behaviorHints: { notWebReady: false, bingeGroup: `ms_${hash}` }
-          };
-          if (isSeasonPack || !isSingleEp) packs.push(stream);
-          else singles.push(stream);
-        }
-
-        // Show packs first, then singles — max 8 total
-        streams = [...packs, ...singles].slice(0, 8);
-
-        if (!streams.length) {
-          streams.push({
-            name: "MultiStream",
-            title: `${titleFromId}\n⚡ Play`,
-            infoHash: hash,
-            sources: TRACKERS,
-            behaviorHints: { notWebReady: false }
-          });
-        }
-      }
-    } catch(e) {
-      console.error(e.message);
+    if (!titleQuery) {
+      return respond(res, { streams: [{
+        name: "MultiStream", title: "⚡ Play",
+        infoHash: refHash || decoded.replace("ms_","").split("_")[0],
+        sources: TRACKERS, behaviorHints: { notWebReady: false }
+      }]});
     }
 
+    // Build search query with S01E01 if episode known
+    let searchQ = titleQuery;
+    if (season !== null && episode !== null) {
+      searchQ = `${titleQuery} S${String(season).padStart(2,"0")}E${String(episode).padStart(2,"0")}`;
+    } else if (season !== null) {
+      searchQ = `${titleQuery} S${String(season).padStart(2,"0")}`;
+    }
+
+    const cat = type === "movie" ? "207" : "205";
+    const results = await tpbSearch(searchQ, cat).catch(() => []);
+    const streams = buildStreams(results, refHash);
+
+    if (!streams.length) {
+      return respond(res, { streams: [{
+        name: "MultiStream", title: `${titleQuery}\n⚡ Play`,
+        infoHash: refHash || "0000000000000000000000000000000000000000",
+        sources: TRACKERS, behaviorHints: { notWebReady: false }
+      }]});
+    }
     return respond(res, { streams });
   }
 
