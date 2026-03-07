@@ -166,7 +166,7 @@ function buildStreams(results, refHash) {
   const seen = new Set(refHash ? [refHash] : []);
   const packs = [], singles = [];
   for (const t of results) {
-    if (!t.info_hash || parseInt(t.seeders) < 5) continue;
+    if (!t.info_hash || parseInt(t.seeders) < 1) continue;
     const h = t.info_hash.toLowerCase();
     if (seen.has(h)) continue;
     seen.add(h);
@@ -176,9 +176,11 @@ function buildStreams(results, refHash) {
     const epMatch = t.name.match(/S(\d+)(?:E(\d+))?/i);
     const isSeasonPack = epMatch && !epMatch[2];
     const epInfo = epMatch ? ` S${epMatch[1]}${epMatch[2] ? "E" + epMatch[2] : " Full Season"}` : "";
+    // Format like ThePirateBay+ : full name on line1, file hint on line2
+    const shortFile = t.name.length > 60 ? t.name.slice(0, 57) + "..." : t.name;
     const stream = {
       name: `MultiStream\n${q}`,
-      title: `${clean(t.name)}${epInfo}\n💾 ${sz} | 🌱 ${sd} seeds`,
+      title: `${shortFile}\n👤 ${sd} 💾 ${sz}`,
       infoHash: h,
       sources: TRACKERS,
       behaviorHints: { notWebReady: false }
@@ -238,7 +240,7 @@ module.exports = async (req, res) => {
       const seen = new Set();
       const metas = [];
       for (const t of results) {
-        if (!t.info_hash || parseInt(t.seeders) < 5) continue;
+        if (!t.info_hash || parseInt(t.seeders) < 1) continue;
         const name = clean(t.name);
         if (!name || seen.has(name.toLowerCase())) continue;
         seen.add(name.toLowerCase());
