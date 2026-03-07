@@ -40,56 +40,20 @@ const CATS = {
   ms_anime:     "205"
 };
 
-// Try direct + multiple proxy methods
-async function tpbFetch(apiPath) {
-  const targetUrl = "https://apibay.org" + apiPath;
-
-  const attempts = [
-    // 1. Direct
-    () => axios.get(targetUrl, { timeout: 8000 }),
-
-    // 2. allorigins proxy
-    () => axios.get(
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
-      { timeout: 10000 }
-    ),
-
-    // 3. corsproxy.io
-    () => axios.get(
-      `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
-      { timeout: 10000 }
-    ),
-
-    // 4. jsonp.afeld.me
-    () => axios.get(
-      `https://jsonp.afeld.me/?url=${encodeURIComponent(targetUrl)}`,
-      { timeout: 10000 }
-    ),
-
-    // 5. thingproxy
-    () => axios.get(
-      `https://thingproxy.freeboard.io/fetch/${targetUrl}`,
-      { timeout: 10000 }
-    ),
-  ];
-
-  for (const attempt of attempts) {
-    try {
-      const res = await attempt();
-      let data = res.data;
-      // allorigins wraps in {contents: "..."}
-      if (data && typeof data === "object" && data.contents) {
-        data = JSON.parse(data.contents);
-      }
-      if (typeof data === "string") {
-        data = JSON.parse(data);
-      }
-      if (Array.isArray(data) && data.length > 0 && data[0].id !== "0") {
-        return data;
-      }
-    } catch (e) {
-      continue;
+// Use Vercel rewrite proxy /tpb/ -> apibay.org
+// This works because Vercel rewrites happen at edge level
+async function tpbFetch(apiPath, baseUrl) {
+  // baseUrl is passed from req headers so we know our own domain
+  const proxyUrl = `${baseUrl}/tpb${apiPath}`;
+  try {
+    const res = await axios.get(proxyUrl, { timeout: 10000 });
+    let data = res.data;
+    if (typeof data === "string") data = JSON.parse(data);
+    if (Array.isArray(data) && data.length > 0 && data[0].id !== "0") {
+      return data;
     }
+  } catch (e) {
+    console.error("tpbFetch error:", e.message);
   }
   return [];
 }
@@ -150,28 +114,26 @@ module.exports = async (req, res) => {
   const rawUrl = req.url || "/";
   const path = rawUrl.split("?")[0];
 
+  // Build base URL from request headers for self-proxy
+  const host = req.headers.host || "localhost:3000";
+  const proto = req.headers["x-forwarded-proto"] || "https";
+  const baseUrl = `${proto}://${host}`;
+
   // MANIFEST
   if (path === "/" || path === "/manifest.json") {
     return respond(res, manifest);
   }
 
-  // DEBUG — test all proxy methods
+  // DEBUG
   if (path === "/debug") {
-    const targetUrl = "https://apibay.org/q.php?q=batman&cat=207";
     const tests = [
-      { name: "direct",       url: targetUrl },
-      { name: "allorigins",   url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}` },
-      { name: "corsproxy.io", url: `https://corsproxy.io/?${encodeURIComponent(targetUrl)}` },
-      { name: "thingproxy",   url: `https://thingproxy.freeboard.io/fetch/${targetUrl}` },
+      { name: "self-proxy /tpb/", url: `${baseUrl}/tpb/q.php?q=batman&cat=207` },
     ];
     const results = [];
     for (const t of tests) {
       try {
-        const r = await axios.get(t.url, { timeout: 8000 });
-        let data = r.data;
-        if (data?.contents) data = JSON.parse(data.contents);
-        if (typeof data === "string") data = JSON.parse(data);
-        results.push({ name: t.name, status: "OK", count: Array.isArray(data) ? data.length : 0, sample: Array.isArray(data) ? data[0]?.name : null });
+        const r = await axios.get(t.url, { timeout: 6000 });
+        results.push({ name: t.name, status: "OK", sample: JSON.stringify(r.data).slice(0, 80) });
       } catch (e) {
         results.push({ name: t.name, status: "FAIL", error: e.message });
       }
@@ -220,7 +182,7 @@ module.exports = async (req, res) => {
     const [, type, id] = metaMatch;
     const hash = id.replace("ms_", "");
     try {
-      const results = await tpbFetch(`/t.php?h=${hash}`);
+      const results = await tpbFetch(`/t.php?h=${hash}`, baseUrl);
       const t = Array.isArray(results) ? results[0] : results;
       if (t && t.name) {
         const title = cleanTitle(t.name);
@@ -245,7 +207,7 @@ module.exports = async (req, res) => {
     const [, type, id] = streamMatch;
     const hash = id.replace("ms_", "").toLowerCase();
     try {
-      const results = await tpbFetch(`/t.php?h=${hash}`);
+      const results = await tpbFetch(`/t.php?h=${hash}`, baseUrl);
       const t = Array.isArray(results) ? results[0] : results;
       const name = t?.name || "";
       return respond(res, {
