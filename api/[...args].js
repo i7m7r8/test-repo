@@ -65,8 +65,8 @@ function year(name) {
   return (name || "").match(/\b(19|20)\d{2}\b/)?.[0] || "";
 }
 
-// ── TMDB poster fetch ─────────────────────────────────────────
-async function getTmdbPoster(title, type) {
+// ── TMDB search: returns { poster, imdbId, name, year, description } ──
+async function tmdbSearch(title, type) {
   try {
     const t = type === "series" ? "tv" : "movie";
     const r = await axios.get(
@@ -74,11 +74,33 @@ async function getTmdbPoster(title, type) {
       { timeout: 5000 }
     );
     const result = r.data?.results?.[0];
-    if (result?.poster_path) {
-      return `https://image.tmdb.org/t/p/w300${result.poster_path}`;
-    }
+    if (!result) return null;
+    const poster = result.poster_path ? `https://image.tmdb.org/t/p/w300${result.poster_path}` : null;
+    const bg = result.backdrop_path ? `https://image.tmdb.org/t/p/w780${result.backdrop_path}` : null;
+    // Fetch IMDB id
+    let imdbId = null;
+    try {
+      const ext = await axios.get(
+        `https://api.themoviedb.org/3/${t}/${result.id}/external_ids?api_key=${TMDB_KEY}`,
+        { timeout: 5000 }
+      );
+      imdbId = ext.data?.imdb_id || null;
+    } catch(e) {}
+    return {
+      poster,
+      bg,
+      imdbId,
+      name: result.title || result.name || title,
+      year: (result.release_date || result.first_air_date || "").slice(0, 4),
+      description: result.overview || ""
+    };
   } catch(e) {}
-  return `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent(title.slice(0, 15))}`;
+  return null;
+}
+
+async function getTmdbPoster(title, type) {
+  const r = await tmdbSearch(title, type);
+  return r?.poster || `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent(title.slice(0, 15))}`;
 }
 
 // ── apibay via proxies ────────────────────────────────────────
@@ -188,15 +210,27 @@ module.exports = async (req, res) => {
         const name = clean(t.name);
         if (!name || seen.has(name.toLowerCase())) continue;
         seen.add(name.toLowerCase());
-        // Encode title in ID so meta/stream don't need to re-fetch
-        const encodedName = encodeURIComponent(name).replace(/%/g, "_");
+        // Try TMDB for poster and IMDB id
+        let poster = `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent(name.slice(0,15))}`;
+        let metaId = `ms_${t.info_hash.toLowerCase()}_${encodeURIComponent(name).replace(/%/g,"_")}`;
+        let metaYear = year(t.name);
+        let desc = `${quality(t.name)} | 🌱 ${t.seeders} seeds | 💾 ${sizeStr(t.size)}`;
+        try {
+          const tmdb = await tmdbSearch(name, type);
+          if (tmdb) {
+            if (tmdb.poster) poster = tmdb.poster;
+            if (tmdb.imdbId) metaId = tmdb.imdbId; // use IMDB id for proper Stremio navigation!
+            if (tmdb.year) metaYear = tmdb.year;
+            if (tmdb.description) desc = tmdb.description;
+          }
+        } catch(e) {}
         metas.push({
-          id: `ms_${t.info_hash.toLowerCase()}_${encodedName}`,
+          id: metaId,
           type,
           name,
-          poster: `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent(name.slice(0, 15))}`,
-          description: `${quality(t.name)} | 🌱 ${t.seeders} seeds | 💾 ${sizeStr(t.size)}`,
-          year: year(t.name),
+          poster,
+          description: desc,
+          year: metaYear,
           genres: []
         });
         if (metas.length >= 20) break;
@@ -209,38 +243,80 @@ module.exports = async (req, res) => {
     }
   }
 
-  // META — title is encoded in ID as ms_HASH_ENCODEDTITLE
-  const mm = path.match(/^\/meta\/([^/]+)\/(ms_[^/]+?)\.json$/);
+  // META
+  const mm = path.match(/^\/meta\/([^/]+)\/([^/]+?)\.json$/);
   if (mm) {
     const [, type, id] = mm;
-    // Extract hash and title from ID
+
+    // IMDB id — fetch from TMDB
+    if (id.startsWith("tt")) {
+      try {
+        const t2 = type === "series" ? "tv" : "movie";
+        const findR = await axios.get(
+          `https://api.themoviedb.org/3/find/${id}?api_key=${TMDB_KEY}&external_source=imdb_id`,
+          { timeout: 5000 }
+        );
+        const found = findR.data?.movie_results?.[0] || findR.data?.tv_results?.[0];
+        if (found) {
+          const poster = found.poster_path ? `https://image.tmdb.org/t/p/w300${found.poster_path}` : null;
+          const bg = found.backdrop_path ? `https://image.tmdb.org/t/p/w780${found.backdrop_path}` : null;
+          const name = found.title || found.name || id;
+          return respond(res, {
+            meta: {
+              id, type, name,
+              poster: poster || `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent(name.slice(0,15))}`,
+              background: bg || poster,
+              description: found.overview || name,
+              year: (found.release_date || found.first_air_date || "").slice(0,4),
+              genres: []
+            }
+          });
+        }
+      } catch(e) {}
+    }
+
+    // ms_ id — extract from encoded title
     const parts = id.replace("ms_", "").split("_");
     const hash = parts[0];
     const name = parts.length > 1
       ? decodeURIComponent(parts.slice(1).join("_").replace(/_/g, "%"))
       : hash.slice(0, 12);
-
-    // Fetch TMDB poster
     const posterUrl = name.length > 5
       ? await getTmdbPoster(name, type)
       : `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=Loading`;
-
     return respond(res, {
-      meta: {
-        id, type, name,
-        poster: posterUrl,
-        background: posterUrl,
-        description: name,
-        genres: []
-      }
+      meta: { id, type, name, poster: posterUrl, background: posterUrl, description: name, genres: [] }
     });
   }
 
   // STREAM — return ALL matching torrents as separate streams
-  const sm = path.match(/^\/stream\/([^/]+)\/(ms_[^/]+?)\.json$/);
+  const sm = path.match(/^\/stream\/([^/]+)\/([^/]+?)\.json$/);
   if (sm) {
     const [, type, id] = sm;
-    const hash = id.replace("ms_", "").toLowerCase();
+    // Handle both IMDB ids (tt1234567) and ms_ ids
+    const isImdb = id.startsWith("tt");
+    const isMsId = id.startsWith("ms_");
+    let hash = "";
+    let titleFromId = "";
+
+    if (isMsId) {
+      const parts = id.replace("ms_", "").split("_");
+      hash = parts[0];
+      titleFromId = parts.length > 1
+        ? decodeURIComponent(parts.slice(1).join("_").replace(/_/g, "%"))
+        : "";
+    } else if (isImdb) {
+      // Look up show name from TMDB using IMDB id
+      try {
+        const t2 = type === "series" ? "tv" : "movie";
+        const findR = await axios.get(
+          `https://api.themoviedb.org/3/find/${id}?api_key=${TMDB_KEY}&external_source=imdb_id`,
+          { timeout: 5000 }
+        );
+        const found = findR.data?.movie_results?.[0] || findR.data?.tv_results?.[0];
+        titleFromId = found?.title || found?.name || "";
+      } catch(e) {}
+    }
 
     // Get the title from meta to search for more torrents
     let streams = [];
@@ -253,13 +329,15 @@ module.exports = async (req, res) => {
         : "";
 
       // First stream: the direct hash
-      streams.push({
-        name: `MultiStream`,
-        title: `${titleFromId || "⚡ Play"}\n🔍 Searching...`,
-        infoHash: hash,
-        sources: TRACKERS,
-        behaviorHints: { notWebReady: false, bingeGroup: `ms_${hash}` }
-      });
+      if (hash) {
+        streams.push({
+          name: `MultiStream`,
+          title: `${titleFromId || "⚡ Play"}\n🔍 Searching...`,
+          infoHash: hash,
+          sources: TRACKERS,
+          behaviorHints: { notWebReady: false, bingeGroup: `ms_${hash}` }
+        });
+      }
 
       // Search for more quality options using title from ID
       if (titleFromId) {
