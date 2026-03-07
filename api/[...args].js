@@ -11,7 +11,9 @@ const manifest = {
   catalogs: [
     { type: "movie",  id: "ms_hollywood",  name: "🎬 Hollywood",         extra: [{ name: "search" }, { name: "skip" }] },
     { type: "movie",  id: "ms_bollywood",  name: "🇮🇳 Bollywood & Hindi", extra: [{ name: "search" }, { name: "skip" }] },
+    { type: "movie",  id: "ms_all_movie",  name: "🌐 All Movies",        extra: [{ name: "search" }, { name: "skip" }] },
     { type: "series", id: "ms_tvshows",    name: "📺 TV Shows",           extra: [{ name: "search" }, { name: "skip" }] },
+    { type: "series", id: "ms_all_series", name: "🌐 All Series",        extra: [{ name: "search" }, { name: "skip" }] },
     { type: "series", id: "ms_anime",      name: "🎌 Anime",              extra: [{ name: "search" }, { name: "skip" }] }
   ],
   resources: ["catalog", "stream", "meta"],
@@ -230,8 +232,8 @@ module.exports = async (req, res) => {
       }
 
       // Movies/TV via apibay
-      const catMap   = { ms_hollywood: "207", ms_bollywood: "200", ms_tvshows: "205" };
-      const queryMap = { ms_hollywood: "movie", ms_bollywood: "hindi", ms_tvshows: "tv show" };
+      const catMap   = { ms_hollywood: "207", ms_bollywood: "200", ms_tvshows: "205", ms_all_movie: "0", ms_all_series: "0" };
+      const queryMap = { ms_hollywood: "movie", ms_bollywood: "hindi", ms_tvshows: "tv show", ms_all_movie: "top", ms_all_series: "top" };
       const q   = search || queryMap[id] || "movie";
       const cat = catMap[id] || "0";
       const results = await tpbSearch(q, cat);
