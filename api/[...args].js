@@ -473,18 +473,6 @@ module.exports = async (req, res) => {
         let poster = `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent(name.slice(0,15))}`;
         let desc = `${quality(t.name)} | 🌱 ${t.seeders} seeds | 💾 ${sizeStr(t.size)}`;
         let yr = (t.name.match(/\b(19|20)\d{2}\b/) || [])[0] || "";
-        // Only do TMDB lookup for non-adult categories to avoid IMDB id collision
-        if (id !== "ms_xxx") {
-          try {
-            const tmdb = await tmdbSearch(name, type);
-            if (tmdb) {
-              if (tmdb.imdbId) metaId = tmdb.imdbId;
-              if (tmdb.poster) poster = tmdb.poster;
-              if (tmdb.description) desc = tmdb.description;
-              if (tmdb.year) yr = tmdb.year;
-            }
-          } catch(e) {}
-        }
         metas.push({ id: metaId, type, name, poster, description: desc, year: yr, genres: [] });
         if (metas.length >= 20) break;
       }
@@ -498,6 +486,19 @@ module.exports = async (req, res) => {
   const mm = path.match(/^\/meta\/([^/]+)\/([^/]+?)\.json$/);
   if (mm) {
     const [, type, id] = mm;
+    // ms_ ids: never touch TMDB, serve local meta only
+    if (id.startsWith("ms_")) {
+      const parts = id.replace("ms_", "").split("_");
+      const name = parts.length > 1
+        ? decodeURIComponent(parts.slice(1).join("_").replace(/_/g, "%"))
+        : parts[0].slice(0, 12);
+      return respond(res, { meta: {
+        id, type, name,
+        poster: `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent(name.slice(0,15))}`,
+        description: name, genres: []
+      }});
+    }
+    // tt ids: TMDB lookup
     if (id.startsWith("tt")) {
       const info = await tmdbFindByImdb(id);
       if (info) {
@@ -509,17 +510,7 @@ module.exports = async (req, res) => {
         }});
       }
     }
-    const parts = id.replace("ms_", "").split("_");
-    const name = parts.length > 1
-      ? decodeURIComponent(parts.slice(1).join("_").replace(/_/g, "%"))
-      : parts[0].slice(0, 12);
-    const tmdb = await tmdbSearch(name, type).catch(() => null);
-    return respond(res, { meta: {
-      id, type, name: tmdb?.name || name,
-      poster: tmdb?.poster || `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent(name.slice(0,15))}`,
-      background: tmdb?.bg || tmdb?.poster,
-      description: tmdb?.description || name, year: tmdb?.year || "", genres: []
-    }});
+    return respond(res, { meta: { id, type, name: id, genres: [] } });
   }
 
   // STREAM
