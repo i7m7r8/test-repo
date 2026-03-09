@@ -473,15 +473,18 @@ module.exports = async (req, res) => {
         let poster = `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent(name.slice(0,15))}`;
         let desc = `${quality(t.name)} | 🌱 ${t.seeders} seeds | 💾 ${sizeStr(t.size)}`;
         let yr = (t.name.match(/\b(19|20)\d{2}\b/) || [])[0] || "";
-        try {
-          const tmdb = await tmdbSearch(name, type);
-          if (tmdb) {
-            if (tmdb.imdbId) metaId = tmdb.imdbId;
-            if (tmdb.poster) poster = tmdb.poster;
-            if (tmdb.description) desc = tmdb.description;
-            if (tmdb.year) yr = tmdb.year;
-          }
-        } catch(e) {}
+        // Only do TMDB lookup for non-adult categories to avoid IMDB id collision
+        if (id !== "ms_xxx") {
+          try {
+            const tmdb = await tmdbSearch(name, type);
+            if (tmdb) {
+              if (tmdb.imdbId) metaId = tmdb.imdbId;
+              if (tmdb.poster) poster = tmdb.poster;
+              if (tmdb.description) desc = tmdb.description;
+              if (tmdb.year) yr = tmdb.year;
+            }
+          } catch(e) {}
+        }
         metas.push({ id: metaId, type, name, poster, description: desc, year: yr, genres: [] });
         if (metas.length >= 20) break;
       }
@@ -547,14 +550,30 @@ module.exports = async (req, res) => {
         : "";
     }
 
-    if (!titleQuery) {
+    // For adult content: serve the stream directly from the hash, no re-search needed
+    const isAdult = decoded.startsWith("ms_") && (() => {
+      // We can't know the catalog here, but if refHash is set and titleQuery looks adult, skip TMDB
+      return true; // ms_ ids never go through TMDB anyway in stream handler
+    })();
+
+    if (!titleQuery || refHash) {
+      // ms_ id: just serve the stored hash directly — no re-search
+      if (refHash) {
+        return respond(res, { streams: [{
+          name: "MultiStream", title: titleQuery || "⚡ Play",
+          infoHash: refHash,
+          fileIdx: 0,
+          sources: TRACKERS, behaviorHints: { notWebReady: false }
+        }]});
+      }
       return respond(res, { streams: [{
         name: "MultiStream", title: "⚡ Play",
-        infoHash: refHash || decoded.replace("ms_","").split("_")[0],
+        infoHash: decoded.replace("ms_","").split("_")[0],
         sources: TRACKERS, behaviorHints: { notWebReady: false }
       }]});
     }
 
+    // IMDB id path — search TPB for matching torrents
     const cat = type === "movie" ? "207" : "205";
     let results = [];
 
