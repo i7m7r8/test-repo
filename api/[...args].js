@@ -124,52 +124,72 @@ async function tmdbFindByImdb(imdbId) {
   } catch(e) { return null; }
 }
 
-// ── apibay via proxies ────────────────────────────────────────
+// ── apibay search ─────────────────────────────────────────────
 async function tpbSearch(q, cat) {
-  const target = `https://apibay.org/q.php?q=${encodeURIComponent(q)}&cat=${cat}`;
-  // Try our own self-proxy first (same Vercel deployment = no IP block)
-  const selfProxy = `https://test-repo-six-sepia.vercel.app/proxy?url=${encodeURIComponent(target)}`;
-  const urls = [
-    selfProxy,
-    `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(target)}`,
-    `http://www.whateverorigin.org/get?url=${encodeURIComponent(target)}`,
-  ];
-  for (const url of urls) {
-    try {
-      const r = await axios.get(url, { timeout: 10000, headers: { "User-Agent": "Mozilla/5.0" } });
-      let d = r.data;
-      if (d && d.contents) { try { d = JSON.parse(d.contents); } catch(e) {} }
-      if (d && d.get)      { try { d = JSON.parse(d.get); }      catch(e) {} }
-      if (typeof d === "string") { try { d = JSON.parse(d); } catch(e) {} }
-      if (Array.isArray(d) && d.length > 0 && d[0].id !== "0") return d;
-    } catch(e) { continue; }
-  }
+  const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36";
+  // Server-side: call apibay directly (no CORS restriction on Vercel)
+  // Also fetch cat=0 in parallel for broader results, then merge+dedup
+  const t1 = `https://apibay.org/q.php?q=${encodeURIComponent(q)}&cat=${cat}`;
+  const t2 = `https://apibay.org/q.php?q=${encodeURIComponent(q)}&cat=0`;
+  try {
+    const [r1, r2] = await Promise.allSettled([
+      axios.get(t1, { timeout: 10000, headers: { "User-Agent": UA } }),
+      cat !== "0" ? axios.get(t2, { timeout: 10000, headers: { "User-Agent": UA } }) : Promise.resolve({ data: [] })
+    ]);
+    const arr1 = Array.isArray(r1.value?.data) ? r1.value.data : [];
+    const arr2 = Array.isArray(r2.value?.data) ? r2.value.data : [];
+    const seen = new Set();
+    const merged = [];
+    for (const t of [...arr1, ...arr2]) {
+      if (!t.info_hash || t.id === "0" || seen.has(t.info_hash.toLowerCase())) continue;
+      seen.add(t.info_hash.toLowerCase());
+      merged.push(t);
+    }
+    if (merged.length > 0) {
+      merged.sort((a, b) => parseInt(b.seeders) - parseInt(a.seeders));
+      return merged;
+    }
+  } catch(e) {}
+  // Fallback: self-proxy (handles cases where apibay blocks Vercel IPs)
+  const selfProxy = `https://test-repo-six-sepia.vercel.app/proxy?url=${encodeURIComponent(t1)}`;
+  try {
+    const r = await axios.get(selfProxy, { timeout: 12000, headers: { "User-Agent": UA } });
+    let d = r.data;
+    if (typeof d === "string") { try { d = JSON.parse(d); } catch(e) {} }
+    if (Array.isArray(d) && d.length > 0 && d[0].id !== "0") return d;
+  } catch(e) {}
   return [];
 }
 
 // ── Nyaa RSS ──────────────────────────────────────────────────
 async function nyaaSearch(q) {
-  const url = `https://nyaa.si/?page=rss&q=${encodeURIComponent(q || "anime")}&c=1_2&f=0`;
-  const r = await axios.get(url, { timeout: 10000, headers: { "User-Agent": "Mozilla/5.0" } });
-  const items = [];
-  for (const block of r.data.split("<item>").slice(1)) {
-    const title   = block.match(/<title>(.*?)<\/title>/s)?.[1]?.trim() || "";
-    const hash    = block.match(/<nyaa:infoHash>([a-fA-F0-9]{40})<\/nyaa:infoHash>/i)?.[1]?.toLowerCase() || "";
-    const seeders = block.match(/<nyaa:seeders>(\d+)<\/nyaa:seeders>/)?.[1] || "0";
-    const size    = block.match(/<nyaa:size>(.*?)<\/nyaa:size>/)?.[1] || "";
-    if (title && hash && parseInt(seeders) > 0) items.push({ title, hash, seeders, size });
-    if (items.length >= 20) break;
-  }
-  return items;
+  try {
+    const url = `https://nyaa.si/?page=rss&q=${encodeURIComponent(q || "anime")}&c=1_2&f=0`;
+    const r = await axios.get(url, { timeout: 10000, headers: { "User-Agent": "Mozilla/5.0" } });
+    const items = [];
+    for (const block of r.data.split("<item>").slice(1)) {
+      const title   = block.match(/<title>(.*?)<\/title>/s)?.[1]?.trim() || "";
+      const hash    = block.match(/<nyaa:infoHash>([a-fA-F0-9]{40})<\/nyaa:infoHash>/i)?.[1]?.toLowerCase() || "";
+      const seeders = block.match(/<nyaa:seeders>(\d+)<\/nyaa:seeders>/)?.[1] || "0";
+      const size    = block.match(/<nyaa:size>(.*?)<\/nyaa:size>/)?.[1] || "";
+      if (title && hash && parseInt(seeders) > 0) items.push({ title, hash, seeders, size });
+      if (items.length >= 20) break;
+    }
+    return items;
+  } catch(e) { return []; }
 }
 
 // ── Build streams from TPB results ───────────────────────────
 function buildStreams(results, refHash) {
   const seen = new Set(refHash ? [refHash] : []);
   const packs = [], singles = [];
+  const MAX_BYTES = 10 * 1024 * 1024 * 1024; // 10 GB
   const sorted = [...results].sort((a, b) => parseInt(b.seeders) - parseInt(a.seeders));
   for (const t of sorted) {
     if (!t.info_hash || parseInt(t.seeders) < 1) continue;
+    // Size check on raw torrent BEFORE building stream object (s._size was never set — bug fixed)
+    const rawBytes = parseInt(t.size || 0);
+    if (rawBytes > MAX_BYTES) continue;
     const h = t.info_hash.toLowerCase();
     if (seen.has(h)) continue;
     seen.add(h);
@@ -178,13 +198,14 @@ function buildStreams(results, refHash) {
     const sd = t.seeders;
     const epMatch = t.name.match(/S(\d+)(?:E(\d+))?/i);
     const isSeasonPack = epMatch && !epMatch[2];
-    const epInfo = epMatch ? ` S${epMatch[1]}${epMatch[2] ? "E" + epMatch[2] : " Full Season"}` : "";
-    // Format like ThePirateBay+ : full name on line1, file hint on line2
+    // fileIdx: episode number is 0-based index into torrent file list
+    const epNum = epMatch?.[2] ? parseInt(epMatch[2]) - 1 : 0;
     const shortFile = t.name.length > 60 ? t.name.slice(0, 57) + "..." : t.name;
     const stream = {
       name: `MultiStream\n${q}`,
       title: `${shortFile}\n👤 ${sd} 💾 ${sz}`,
       infoHash: h,
+      fileIdx: epNum,
       sources: TRACKERS,
       behaviorHints: { notWebReady: false }
     };
@@ -192,18 +213,7 @@ function buildStreams(results, refHash) {
     else singles.push(stream);
     if (packs.length + singles.length >= 8) break;
   }
-  // Singles (specific episodes) first, packs after
-  // Filter: skip anything over 10GB (season remux packs - unplayable on mobile)
-  const MAX_BYTES = 10 * 1024 * 1024 * 1024; // 10 GB
-  const allResults = [...singles, ...packs];
-  const filtered = allResults.filter(s => {
-    const rawSize = parseInt(s._size || 0);
-    return rawSize === 0 || rawSize <= MAX_BYTES;
-  });
-  // If nothing left after filter, return at least singles
-  const final = filtered.length > 0 ? filtered : singles;
-  final.forEach(s => delete s._size);
-  return final.slice(0, 8);
+  return [...singles, ...packs].slice(0, 8);
 }
 
 // ── Main handler ──────────────────────────────────────────────
