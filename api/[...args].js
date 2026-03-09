@@ -12,7 +12,9 @@ const manifest = {
     { type: "movie",  id: "ms_hollywood",  name: "🎬 Hollywood",         extra: [{ name: "search" }, { name: "skip" }] },
     { type: "movie",  id: "ms_bollywood",  name: "🇮🇳 Bollywood & Hindi", extra: [{ name: "search" }, { name: "skip" }] },
     { type: "series", id: "ms_tvshows",    name: "📺 TV Shows",           extra: [{ name: "search" }, { name: "skip" }] },
-    { type: "series", id: "ms_anime",      name: "🎌 Anime",              extra: [{ name: "search" }, { name: "skip" }] }
+    { type: "series", id: "ms_anime",      name: "🎌 Anime",              extra: [{ name: "search" }, { name: "skip" }] },
+    { type: "movie",  id: "ms_xxx",        name: "🔞 Uncensored",         extra: [{ name: "search" }, { name: "skip" }] },
+    { type: "series", id: "ms_hentai",     name: "🔞 Hentai",             extra: [{ name: "search" }, { name: "skip" }] }
   ],
   resources: ["catalog", "stream", "meta"],
   types: ["movie", "series"],
@@ -127,8 +129,6 @@ async function tmdbFindByImdb(imdbId) {
 // ── apibay search ─────────────────────────────────────────────
 async function tpbSearch(q, cat) {
   const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36";
-  // Server-side: call apibay directly (no CORS restriction on Vercel)
-  // Also fetch cat=0 in parallel for broader results, then merge+dedup
   const t1 = `https://apibay.org/q.php?q=${encodeURIComponent(q)}&cat=${cat}`;
   const t2 = `https://apibay.org/q.php?q=${encodeURIComponent(q)}&cat=0`;
   try {
@@ -150,7 +150,6 @@ async function tpbSearch(q, cat) {
       return merged;
     }
   } catch(e) {}
-  // Fallback: self-proxy (handles cases where apibay blocks Vercel IPs)
   const selfProxy = `https://test-repo-six-sepia.vercel.app/proxy?url=${encodeURIComponent(t1)}`;
   try {
     const r = await axios.get(selfProxy, { timeout: 12000, headers: { "User-Agent": UA } });
@@ -179,15 +178,32 @@ async function nyaaSearch(q) {
   } catch(e) { return []; }
 }
 
+// ── Nyaa Sukebei RSS (hentai anime) ──────────────────────────
+async function nyaaSukebeSearch(q) {
+  try {
+    const url = `https://sukebei.nyaa.si/?page=rss&q=${encodeURIComponent(q || "hentai")}&c=2_2&f=0`;
+    const r = await axios.get(url, { timeout: 10000, headers: { "User-Agent": "Mozilla/5.0" } });
+    const items = [];
+    for (const block of r.data.split("<item>").slice(1)) {
+      const title   = block.match(/<title>(.*?)<\/title>/s)?.[1]?.trim() || "";
+      const hash    = block.match(/<nyaa:infoHash>([a-fA-F0-9]{40})<\/nyaa:infoHash>/i)?.[1]?.toLowerCase() || "";
+      const seeders = block.match(/<nyaa:seeders>(\d+)<\/nyaa:seeders>/)?.[1] || "0";
+      const size    = block.match(/<nyaa:size>(.*?)<\/nyaa:size>/)?.[1] || "";
+      if (title && hash && parseInt(seeders) > 0) items.push({ title, hash, seeders, size });
+      if (items.length >= 20) break;
+    }
+    return items;
+  } catch(e) { return []; }
+}
+
 // ── Build streams from TPB results ───────────────────────────
 function buildStreams(results, refHash) {
   const seen = new Set(refHash ? [refHash] : []);
   const packs = [], singles = [];
-  const MAX_BYTES = 10 * 1024 * 1024 * 1024; // 10 GB
+  const MAX_BYTES = 10 * 1024 * 1024 * 1024;
   const sorted = [...results].sort((a, b) => parseInt(b.seeders) - parseInt(a.seeders));
   for (const t of sorted) {
     if (!t.info_hash || parseInt(t.seeders) < 1) continue;
-    // Size check on raw torrent BEFORE building stream object (s._size was never set — bug fixed)
     const rawBytes = parseInt(t.size || 0);
     if (rawBytes > MAX_BYTES) continue;
     const h = t.info_hash.toLowerCase();
@@ -198,7 +214,6 @@ function buildStreams(results, refHash) {
     const sd = t.seeders;
     const epMatch = t.name.match(/S(\d+)(?:E(\d+))?/i);
     const isSeasonPack = epMatch && !epMatch[2];
-    // fileIdx: episode number is 0-based index into torrent file list
     const epNum = epMatch?.[2] ? parseInt(epMatch[2]) - 1 : 0;
     const shortFile = t.name.length > 60 ? t.name.slice(0, 57) + "..." : t.name;
     const stream = {
@@ -224,19 +239,81 @@ module.exports = async (req, res) => {
 
   const path = (req.url || "/").split("?")[0];
 
-  // SELF-PROXY
-  if (path === "/proxy") {
-    // Vercel may decode %26→& so URLSearchParams breaks for nested URLs
-    // Manually extract everything after "url=" as the target
+  // ── STREAM-PROXY — pipes any video URL with CORS + Range support for Video.js ──
+  if (path === "/stream-proxy") {
     const rawUrl = req.url || "";
     const urlIdx = rawUrl.indexOf("?url=");
     const rawTarget = urlIdx >= 0 ? rawUrl.slice(urlIdx + 5) : "";
-    // Decode only once - handles both encoded and raw & 
+    let targetUrl = "";
+    try { targetUrl = decodeURIComponent(rawTarget); } catch(e) { targetUrl = rawTarget; }
+
+    if (!targetUrl.startsWith("https://") && !targetUrl.startsWith("http://")) {
+      res.statusCode = 400; res.end(JSON.stringify({ error: "invalid url" })); return;
+    }
+
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges, Content-Type");
+
+    if (req.method === "OPTIONS") { res.statusCode = 200; res.end(); return; }
+
+    try {
+      const https = require("https");
+      const http  = require("http");
+
+      const fetchAndPipe = (url, redirectCount = 0) => {
+        if (redirectCount > 5) { res.statusCode = 502; res.end("too many redirects"); return; }
+        const mod = url.startsWith("https") ? https : http;
+        const upstreamHeaders = {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          "Accept": "*/*",
+        };
+        if (req.headers["range"]) upstreamHeaders["Range"] = req.headers["range"];
+
+        const u = new URL(url);
+        const upReq = mod.request({
+          hostname: u.hostname,
+          path: u.pathname + u.search,
+          method: "GET",
+          headers: upstreamHeaders,
+          timeout: 30000,
+        }, (upRes) => {
+          if (upRes.statusCode >= 300 && upRes.statusCode < 400 && upRes.headers.location) {
+            upRes.resume();
+            const next = upRes.headers.location.startsWith("http")
+              ? upRes.headers.location
+              : `${u.protocol}//${u.host}${upRes.headers.location}`;
+            return fetchAndPipe(next, redirectCount + 1);
+          }
+          const fwd = ["content-type","content-length","content-range","accept-ranges","last-modified","etag"];
+          fwd.forEach(h => { if (upRes.headers[h]) res.setHeader(h, upRes.headers[h]); });
+          res.statusCode = upRes.statusCode;
+          upRes.pipe(res);
+          upRes.on("error", () => { try { res.end(); } catch(e) {} });
+        });
+
+        upReq.on("error", (e) => { res.statusCode = 502; res.end("upstream error: " + e.message); });
+        upReq.on("timeout", () => { upReq.destroy(); res.statusCode = 504; res.end("timeout"); });
+        upReq.end();
+      };
+
+      fetchAndPipe(targetUrl);
+    } catch(e) {
+      res.statusCode = 500;
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+
+  // ── SELF-PROXY ──
+  if (path === "/proxy") {
+    const rawUrl = req.url || "";
+    const urlIdx = rawUrl.indexOf("?url=");
+    const rawTarget = urlIdx >= 0 ? rawUrl.slice(urlIdx + 5) : "";
     let decoded = "";
     try { decoded = decodeURIComponent(rawTarget); } catch(e) { decoded = rawTarget; }
-    // If decoded still has issues, try taking up to first unrelated &
     if (!decoded.startsWith("https://apibay.org/") && !decoded.startsWith("https://nyaa.si/")) {
-      // Try without decoding
       decoded = rawTarget.startsWith("https") ? rawTarget : "";
     }
     if (!decoded.startsWith("https://apibay.org/") && !decoded.startsWith("https://nyaa.si/")) {
@@ -263,7 +340,6 @@ module.exports = async (req, res) => {
           },
           timeout: 12000
         }, (resp) => {
-          // follow redirect
           if (resp.statusCode >= 300 && resp.statusCode < 400 && resp.headers.location) {
             return fetchUrl(resp.headers.location).then(resolve).catch(reject);
           }
@@ -274,13 +350,11 @@ module.exports = async (req, res) => {
         r.end();
       });
 
-      // If apibay, also try fetching cat=0 (all) in parallel for more results
       let data = "[]";
       if (decoded.includes("apibay.org/q.php")) {
         const u = new URL(decoded);
         const q = u.searchParams.get("q");
         const cat = u.searchParams.get("cat") || "0";
-        // Fetch both the requested cat and cat=0 in parallel
         const [r1, r2] = await Promise.allSettled([
           fetchUrl(decoded),
           cat !== "0" ? fetchUrl(`https://apibay.org/q.php?q=${encodeURIComponent(q)}&cat=0`) : Promise.resolve("[]")
@@ -288,7 +362,6 @@ module.exports = async (req, res) => {
         let arr1 = [], arr2 = [];
         try { arr1 = JSON.parse(r1.status === "fulfilled" ? r1.value : "[]"); } catch(e) {}
         try { arr2 = JSON.parse(r2.status === "fulfilled" ? r2.value : "[]"); } catch(e) {}
-        // Merge and deduplicate by info_hash, sort by seeders desc
         const seen = new Set();
         const merged = [];
         for (const t of [...arr1, ...arr2]) {
@@ -319,7 +392,51 @@ module.exports = async (req, res) => {
     const extra = parseExtra(extraStr);
     const search = extra.search || "";
     try {
-      // Anime via Nyaa
+      // Hentai via Sukebei Nyaa
+      if (id === "ms_hentai") {
+        const items = await nyaaSukebeSearch(search || "hentai 1080p");
+        const seen = new Set();
+        const metas = [];
+        for (const item of items) {
+          const name = clean(item.title.replace(/^\[.*?\]\s*/, ""));
+          if (!name || seen.has(name.toLowerCase())) continue;
+          seen.add(name.toLowerCase());
+          const encodedName = encodeURIComponent(name).replace(/%/g, "_");
+          metas.push({
+            id: `ms_${item.hash}_${encodedName}`,
+            type: "series", name,
+            poster: `https://via.placeholder.com/300x450/1a0a0a/f97316?text=${encodeURIComponent(name.slice(0,15))}`,
+            description: `🔞 ${quality(item.title)} | 🌱 ${item.seeders} seeds | ${item.size}`,
+            genres: ["Hentai", "Adult", "Anime"]
+          });
+        }
+        return respond(res, { metas });
+      }
+
+      // Uncensored/Adult via TPB cat 500 (Adult Movies)
+      if (id === "ms_xxx") {
+        const q = search || "xxx 1080p";
+        const results = await tpbSearch(q, "500");
+        const seen = new Set();
+        const metas = [];
+        for (const t of results) {
+          if (!t.info_hash || parseInt(t.seeders) < 1) continue;
+          const name = clean(t.name);
+          if (!name || seen.has(name.toLowerCase())) continue;
+          seen.add(name.toLowerCase());
+          const encodedName = encodeURIComponent(name).replace(/%/g, "_");
+          metas.push({
+            id: `ms_${t.info_hash.toLowerCase()}_${encodedName}`,
+            type: "movie", name,
+            poster: `https://via.placeholder.com/300x450/1a0a0a/f97316?text=${encodeURIComponent(name.slice(0,15))}`,
+            description: `🔞 ${quality(t.name)} | 🌱 ${t.seeders} seeds | 💾 ${sizeStr(t.size)}`,
+            genres: ["Adult"]
+          });
+          if (metas.length >= 20) break;
+        }
+        return respond(res, { metas });
+      }
+
       if (id === "ms_anime") {
         const items = await nyaaSearch(search || "anime 1080p");
         const seen = new Set();
@@ -340,9 +457,8 @@ module.exports = async (req, res) => {
         return respond(res, { metas });
       }
 
-      // Movies/TV via apibay
-      const catMap   = { ms_hollywood: "207", ms_bollywood: "200", ms_tvshows: "205" };
-      const queryMap = { ms_hollywood: "movie", ms_bollywood: "hindi", ms_tvshows: "tv show" };
+      const catMap   = { ms_hollywood: "207", ms_bollywood: "200", ms_tvshows: "205", ms_xxx: "500", ms_hentai: "302" };
+      const queryMap = { ms_hollywood: "movie", ms_bollywood: "hindi", ms_tvshows: "tv show", ms_xxx: "xxx", ms_hentai: "hentai" };
       const q   = search || queryMap[id] || "movie";
       const cat = catMap[id] || "0";
       const results = await tpbSearch(q, cat);
@@ -353,7 +469,6 @@ module.exports = async (req, res) => {
         const name = clean(t.name);
         if (!name || seen.has(name.toLowerCase())) continue;
         seen.add(name.toLowerCase());
-        // Try TMDB for IMDB id + poster
         let metaId = `ms_${t.info_hash.toLowerCase()}_${encodeURIComponent(name).replace(/%/g,"_")}`;
         let poster = `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent(name.slice(0,15))}`;
         let desc = `${quality(t.name)} | 🌱 ${t.seeders} seeds | 💾 ${sizeStr(t.size)}`;
@@ -408,7 +523,6 @@ module.exports = async (req, res) => {
   const sm = path.match(/^\/stream\/([^/]+)\/([^/]+?)\.json$/);
   if (sm) {
     const [, type, rawId] = sm;
-    // Decode %3A → : for episode ids like tt0455275%3A1%3A1
     const decoded = decodeURIComponent(rawId);
     const ttMatch = decoded.match(/^(tt\d+)(?::(\d+):(\d+))?$/);
     const isMsId  = decoded.startsWith("ms_");
@@ -418,7 +532,6 @@ module.exports = async (req, res) => {
     let refHash = "";
 
     if (ttMatch) {
-      // IMDB id — look up title from TMDB
       const imdbId = ttMatch[1];
       season  = ttMatch[2] ? parseInt(ttMatch[2]) : null;
       episode = ttMatch[3] ? parseInt(ttMatch[3]) : null;
@@ -442,14 +555,12 @@ module.exports = async (req, res) => {
       }]});
     }
 
-    // Build search query with S01E01 if episode known
     const cat = type === "movie" ? "207" : "205";
     let results = [];
 
     if (season !== null && episode !== null) {
       const epQ     = `${titleQuery} S${String(season).padStart(2,"0")}E${String(episode).padStart(2,"0")}`;
       const seasonQ = `${titleQuery} S${String(season).padStart(2,"0")}`;
-      // Fetch specific episode AND season pack in parallel — no broad title search (too noisy)
       const [r1, r2] = await Promise.allSettled([
         tpbSearch(epQ, cat),
         tpbSearch(seasonQ, cat),
@@ -460,11 +571,9 @@ module.exports = async (req, res) => {
         if (r.status !== "fulfilled") continue;
         for (const t of r.value) {
           if (!t.info_hash || seen.has(t.info_hash.toLowerCase())) continue;
-          // Safety: result must contain show title (allow partial match for season packs)
           const titleWords = titleQuery.toLowerCase().split(" ").filter(w => w.length > 2);
           const tname = t.name.toLowerCase();
           const matchCount = titleWords.filter(w => tname.includes(w)).length;
-          // Must match at least half the title words (allows "Legion S01 Complete" to pass)
           if (matchCount < Math.ceil(titleWords.length * 0.6)) continue;
           seen.add(t.info_hash.toLowerCase());
           merged.push(t);
