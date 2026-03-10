@@ -214,14 +214,13 @@ function buildStreams(results, refHash) {
     const sd = t.seeders;
     const epMatch = t.name.match(/S(\d+)(?:E(\d+))?/i);
     const isSeasonPack = epMatch && !epMatch[2];
-    // If it's a single episode, use the episode number as file index (0-based)
     const epNum = epMatch?.[2] ? parseInt(epMatch[2]) - 1 : 0;
     const shortFile = t.name.length > 60 ? t.name.slice(0, 57) + "..." : t.name;
     const stream = {
       name: `MultiStream\n${q}`,
       title: `${shortFile}\n👤 ${sd} 💾 ${sz}`,
       infoHash: h,
-      fileIdx: isSeasonPack ? 0 : epNum, // For packs, default to 0; for episodes, use the episode index
+      fileIdx: epNum,
       sources: TRACKERS,
       behaviorHints: { notWebReady: false }
     };
@@ -404,7 +403,7 @@ module.exports = async (req, res) => {
           seen.add(name.toLowerCase());
           const encodedName = encodeURIComponent(name).replace(/%/g, "_");
           metas.push({
-            id: `ms_${item.hash}_0_${encodedName}`, // fileIdx = 0 as default
+            id: `ms_${item.hash}_${encodedName}`,
             type: "series", name,
             poster: `https://via.placeholder.com/300x450/1a0a0a/f97316?text=${encodeURIComponent(name.slice(0,15))}`,
             description: `🔞 ${quality(item.title)} | 🌱 ${item.seeders} seeds | ${item.size}`,
@@ -427,7 +426,7 @@ module.exports = async (req, res) => {
           seen.add(name.toLowerCase());
           const encodedName = encodeURIComponent(name).replace(/%/g, "_");
           metas.push({
-            id: `ms_${t.info_hash.toLowerCase()}_0_${encodedName}`, // fileIdx default 0
+            id: `ms_${t.info_hash.toLowerCase()}_${encodedName}`,
             type: "movie", name,
             poster: `https://via.placeholder.com/300x450/1a0a0a/f97316?text=${encodeURIComponent(name.slice(0,15))}`,
             description: `🔞 ${quality(t.name)} | 🌱 ${t.seeders} seeds | 💾 ${sizeStr(t.size)}`,
@@ -448,7 +447,7 @@ module.exports = async (req, res) => {
           seen.add(name.toLowerCase());
           const encodedName = encodeURIComponent(name).replace(/%/g, "_");
           metas.push({
-            id: `ms_${item.hash}_0_${encodedName}`,
+            id: `ms_${item.hash}_${encodedName}`,
             type: "series", name,
             poster: `https://via.placeholder.com/300x450/0f0f1a/e879f9?text=${encodeURIComponent(name.slice(0,15))}`,
             description: `🎌 ${quality(item.title)} | 🌱 ${item.seeders} seeds | ${item.size}`,
@@ -470,11 +469,7 @@ module.exports = async (req, res) => {
         const name = clean(t.name);
         if (!name || seen.has(name.toLowerCase())) continue;
         seen.add(name.toLowerCase());
-        const encodedName = encodeURIComponent(name).replace(/%/g, "_");
-        // Determine a plausible file index from episode number if possible
-        const epMatch = t.name.match(/S\d+E(\d+)/i);
-        const fileIdx = epMatch ? parseInt(epMatch[1]) - 1 : 0;
-        const metaId = `ms_${t.info_hash.toLowerCase()}_${fileIdx}_${encodedName}`;
+        let metaId = `ms_${t.info_hash.toLowerCase()}_${encodeURIComponent(name).replace(/%/g,"_")}`;
         let poster = `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent(name.slice(0,15))}`;
         let desc = `${quality(t.name)} | 🌱 ${t.seeders} seeds | 💾 ${sizeStr(t.size)}`;
         let yr = (t.name.match(/\b(19|20)\d{2}\b/) || [])[0] || "";
@@ -494,11 +489,8 @@ module.exports = async (req, res) => {
     // ms_ ids: never touch TMDB, serve local meta only
     if (id.startsWith("ms_")) {
       const parts = id.replace("ms_", "").split("_");
-      // Format: hash_fileIdx_encodedName (fileIdx may be missing in older entries)
-      const hash = parts[0];
-      const fileIdx = parts.length > 2 ? parseInt(parts[1]) : 0;
-      const name = parts.length > (fileIdx ? 3 : 2)
-        ? decodeURIComponent(parts.slice(fileIdx ? 3 : 2).join("_").replace(/_/g, "%"))
+      const name = parts.length > 1
+        ? decodeURIComponent(parts.slice(1).join("_").replace(/_/g, "%"))
         : parts[0].slice(0, 12);
       return respond(res, { meta: {
         id, type, name,
@@ -531,7 +523,7 @@ module.exports = async (req, res) => {
 
     let titleQuery = "";
     let season = null, episode = null;
-    let refHash = "", fileIdx = 0;
+    let refHash = "";
 
     if (ttMatch) {
       const imdbId = ttMatch[1];
@@ -542,24 +534,33 @@ module.exports = async (req, res) => {
         titleQuery = info?.name || "";
       } catch(e) {}
     } else if (isMsId) {
-      // Format: ms_<hash>_<fileIdx>_<encodedName>
       const parts = decoded.replace("ms_", "").split("_");
       refHash = parts[0];
-      fileIdx = parts.length > 2 ? parseInt(parts[1]) : 0;
-      titleQuery = parts.length > (fileIdx ? 3 : 2)
-        ? decodeURIComponent(parts.slice(fileIdx ? 3 : 2).join("_").replace(/_/g, "%"))
+      titleQuery = parts.length > 1
+        ? decodeURIComponent(parts.slice(1).join("_").replace(/_/g, "%"))
         : "";
     }
 
-    // For ms_ ids: just serve the stored hash directly
-    if (isMsId && refHash) {
+    // For adult content: serve the stream directly from the hash, no re-search needed
+    const isAdult = decoded.startsWith("ms_") && (() => {
+      // We can't know the catalog here, but if refHash is set and titleQuery looks adult, skip TMDB
+      return true; // ms_ ids never go through TMDB anyway in stream handler
+    })();
+
+    if (!titleQuery || refHash) {
+      // ms_ id: just serve the stored hash directly — no re-search
+      if (refHash) {
+        return respond(res, { streams: [{
+          name: "MultiStream", title: titleQuery || "⚡ Play",
+          infoHash: refHash,
+          fileIdx: 0,
+          sources: TRACKERS, behaviorHints: { notWebReady: false }
+        }]});
+      }
       return respond(res, { streams: [{
-        name: "MultiStream",
-        title: titleQuery || "⚡ Play",
-        infoHash: refHash,
-        fileIdx: fileIdx,
-        sources: TRACKERS,
-        behaviorHints: { notWebReady: false }
+        name: "MultiStream", title: "⚡ Play",
+        infoHash: decoded.replace("ms_","").split("_")[0],
+        sources: TRACKERS, behaviorHints: { notWebReady: false }
       }]});
     }
 
@@ -603,6 +604,7 @@ module.exports = async (req, res) => {
     }
     return respond(res, { streams });
   }
+
 
   // ── EPORNER SEARCH ──────────────────────────────────────────────
   // GET /eporner?q=QUERY&n=20
@@ -652,6 +654,85 @@ module.exports = async (req, res) => {
     } catch (e) {
       res.statusCode = 502;
       res.end(JSON.stringify({ videos: [], error: String(e.message) }));
+    }
+    return;
+  }
+
+
+  // ── EMBED PROXY — fetches 2embed HTML and injects CSS to hide share button ──
+  if (path === "/embed-proxy") {
+    const qs = new URL(req.url, "http://localhost").searchParams;
+    const target = qs.get("url") || "";
+    if (!target.startsWith("https://www.2embed.cc/")) {
+      res.statusCode = 403; res.end("forbidden"); return;
+    }
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("X-Frame-Options", "ALLOWALL");
+    try {
+      const r = await axios.get(target, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+          "Referer": "https://www.2embed.cc/",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+        timeout: 15000,
+        maxRedirects: 5,
+      });
+      let html = r.data || "";
+      // Inject CSS to hide share/social buttons — targets JW Player and common share elements
+      const hideCSS = `<style>
+        .jw-icon-sharing, .jw-sharing-skin, .jw-button-container .jw-icon-sharing,
+        [class*="share"]:not(video), [id*="share"]:not(video),
+        [class*="social"]:not(video), [id*="social"]:not(video),
+        a[href*="facebook"], a[href*="twitter"], a[href*="whatsapp"],
+        button[aria-label*="hare"], [data-sharing], .sharing-overlay,
+        .jw-controlbar .jw-icon-sharing { 
+          display:none!important; 
+          visibility:hidden!important; 
+          opacity:0!important; 
+          pointer-events:none!important; 
+          width:0!important; 
+          height:0!important; 
+        }
+      </style>`;
+      // Also inject a MutationObserver script to catch dynamically added share buttons
+      const hideJS = `<script>
+        (function() {
+          function nuke() {
+            document.querySelectorAll([
+              '[class*="share"]','[id*="share"]',
+              '[class*="social"]','[id*="social"]',
+              '.jw-icon-sharing','.jw-sharing-skin',
+              'a[href*="facebook"]','a[href*="twitter"]'
+            ].join(",")).forEach(function(el) {
+              if (el.tagName !== "VIDEO" && el.tagName !== "SOURCE") {
+                el.style.cssText = "display:none!important;width:0!important;height:0!important;";
+              }
+            });
+          }
+          nuke();
+          setInterval(nuke, 800);
+          var obs = new MutationObserver(nuke);
+          obs.observe(document.documentElement, {childList:true, subtree:true});
+        })();
+      <\/script>`;
+      // Inject before </head> or at start
+      if (html.includes("</head>")) {
+        html = html.replace("</head>", hideCSS + "</head>");
+      } else {
+        html = hideCSS + html;
+      }
+      // Inject JS before </body>
+      if (html.includes("</body>")) {
+        html = html.replace("</body>", hideJS + "</body>");
+      } else {
+        html = html + hideJS;
+      }
+      res.end(html);
+    } catch(e) {
+      res.statusCode = 502;
+      res.end("<html><body>proxy error: " + e.message + "</body></html>");
     }
     return;
   }
