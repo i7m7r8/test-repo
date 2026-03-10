@@ -214,13 +214,14 @@ function buildStreams(results, refHash) {
     const sd = t.seeders;
     const epMatch = t.name.match(/S(\d+)(?:E(\d+))?/i);
     const isSeasonPack = epMatch && !epMatch[2];
+    // If it's a single episode, use the episode number as file index (0-based)
     const epNum = epMatch?.[2] ? parseInt(epMatch[2]) - 1 : 0;
     const shortFile = t.name.length > 60 ? t.name.slice(0, 57) + "..." : t.name;
     const stream = {
       name: `MultiStream\n${q}`,
       title: `${shortFile}\n👤 ${sd} 💾 ${sz}`,
       infoHash: h,
-      fileIdx: epNum,
+      fileIdx: isSeasonPack ? 0 : epNum, // For packs, default to 0; for episodes, use the episode index
       sources: TRACKERS,
       behaviorHints: { notWebReady: false }
     };
@@ -403,7 +404,7 @@ module.exports = async (req, res) => {
           seen.add(name.toLowerCase());
           const encodedName = encodeURIComponent(name).replace(/%/g, "_");
           metas.push({
-            id: `ms_${item.hash}_${encodedName}`,
+            id: `ms_${item.hash}_0_${encodedName}`, // fileIdx = 0 as default
             type: "series", name,
             poster: `https://via.placeholder.com/300x450/1a0a0a/f97316?text=${encodeURIComponent(name.slice(0,15))}`,
             description: `🔞 ${quality(item.title)} | 🌱 ${item.seeders} seeds | ${item.size}`,
@@ -426,7 +427,7 @@ module.exports = async (req, res) => {
           seen.add(name.toLowerCase());
           const encodedName = encodeURIComponent(name).replace(/%/g, "_");
           metas.push({
-            id: `ms_${t.info_hash.toLowerCase()}_${encodedName}`,
+            id: `ms_${t.info_hash.toLowerCase()}_0_${encodedName}`, // fileIdx default 0
             type: "movie", name,
             poster: `https://via.placeholder.com/300x450/1a0a0a/f97316?text=${encodeURIComponent(name.slice(0,15))}`,
             description: `🔞 ${quality(t.name)} | 🌱 ${t.seeders} seeds | 💾 ${sizeStr(t.size)}`,
@@ -447,7 +448,7 @@ module.exports = async (req, res) => {
           seen.add(name.toLowerCase());
           const encodedName = encodeURIComponent(name).replace(/%/g, "_");
           metas.push({
-            id: `ms_${item.hash}_${encodedName}`,
+            id: `ms_${item.hash}_0_${encodedName}`,
             type: "series", name,
             poster: `https://via.placeholder.com/300x450/0f0f1a/e879f9?text=${encodeURIComponent(name.slice(0,15))}`,
             description: `🎌 ${quality(item.title)} | 🌱 ${item.seeders} seeds | ${item.size}`,
@@ -469,7 +470,11 @@ module.exports = async (req, res) => {
         const name = clean(t.name);
         if (!name || seen.has(name.toLowerCase())) continue;
         seen.add(name.toLowerCase());
-        let metaId = `ms_${t.info_hash.toLowerCase()}_${encodeURIComponent(name).replace(/%/g,"_")}`;
+        const encodedName = encodeURIComponent(name).replace(/%/g, "_");
+        // Determine a plausible file index from episode number if possible
+        const epMatch = t.name.match(/S\d+E(\d+)/i);
+        const fileIdx = epMatch ? parseInt(epMatch[1]) - 1 : 0;
+        const metaId = `ms_${t.info_hash.toLowerCase()}_${fileIdx}_${encodedName}`;
         let poster = `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent(name.slice(0,15))}`;
         let desc = `${quality(t.name)} | 🌱 ${t.seeders} seeds | 💾 ${sizeStr(t.size)}`;
         let yr = (t.name.match(/\b(19|20)\d{2}\b/) || [])[0] || "";
@@ -489,8 +494,11 @@ module.exports = async (req, res) => {
     // ms_ ids: never touch TMDB, serve local meta only
     if (id.startsWith("ms_")) {
       const parts = id.replace("ms_", "").split("_");
-      const name = parts.length > 1
-        ? decodeURIComponent(parts.slice(1).join("_").replace(/_/g, "%"))
+      // Format: hash_fileIdx_encodedName (fileIdx may be missing in older entries)
+      const hash = parts[0];
+      const fileIdx = parts.length > 2 ? parseInt(parts[1]) : 0;
+      const name = parts.length > (fileIdx ? 3 : 2)
+        ? decodeURIComponent(parts.slice(fileIdx ? 3 : 2).join("_").replace(/_/g, "%"))
         : parts[0].slice(0, 12);
       return respond(res, { meta: {
         id, type, name,
@@ -523,7 +531,7 @@ module.exports = async (req, res) => {
 
     let titleQuery = "";
     let season = null, episode = null;
-    let refHash = "";
+    let refHash = "", fileIdx = 0;
 
     if (ttMatch) {
       const imdbId = ttMatch[1];
@@ -534,33 +542,24 @@ module.exports = async (req, res) => {
         titleQuery = info?.name || "";
       } catch(e) {}
     } else if (isMsId) {
+      // Format: ms_<hash>_<fileIdx>_<encodedName>
       const parts = decoded.replace("ms_", "").split("_");
       refHash = parts[0];
-      titleQuery = parts.length > 1
-        ? decodeURIComponent(parts.slice(1).join("_").replace(/_/g, "%"))
+      fileIdx = parts.length > 2 ? parseInt(parts[1]) : 0;
+      titleQuery = parts.length > (fileIdx ? 3 : 2)
+        ? decodeURIComponent(parts.slice(fileIdx ? 3 : 2).join("_").replace(/_/g, "%"))
         : "";
     }
 
-    // For adult content: serve the stream directly from the hash, no re-search needed
-    const isAdult = decoded.startsWith("ms_") && (() => {
-      // We can't know the catalog here, but if refHash is set and titleQuery looks adult, skip TMDB
-      return true; // ms_ ids never go through TMDB anyway in stream handler
-    })();
-
-    if (!titleQuery || refHash) {
-      // ms_ id: just serve the stored hash directly — no re-search
-      if (refHash) {
-        return respond(res, { streams: [{
-          name: "MultiStream", title: titleQuery || "⚡ Play",
-          infoHash: refHash,
-          fileIdx: 0,
-          sources: TRACKERS, behaviorHints: { notWebReady: false }
-        }]});
-      }
+    // For ms_ ids: just serve the stored hash directly
+    if (isMsId && refHash) {
       return respond(res, { streams: [{
-        name: "MultiStream", title: "⚡ Play",
-        infoHash: decoded.replace("ms_","").split("_")[0],
-        sources: TRACKERS, behaviorHints: { notWebReady: false }
+        name: "MultiStream",
+        title: titleQuery || "⚡ Play",
+        infoHash: refHash,
+        fileIdx: fileIdx,
+        sources: TRACKERS,
+        behaviorHints: { notWebReady: false }
       }]});
     }
 
@@ -604,7 +603,6 @@ module.exports = async (req, res) => {
     }
     return respond(res, { streams });
   }
-
 
   // ── EPORNER SEARCH ──────────────────────────────────────────────
   // GET /eporner?q=QUERY&n=20
