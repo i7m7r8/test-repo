@@ -605,6 +605,47 @@ module.exports = async (req, res) => {
     return respond(res, { streams });
   }
 
+
+  // ── EPORNER SEARCH ──────────────────────────────────────────────
+  // GET /eporner?q=QUERY&n=20
+  // Fetches Eporner official API server-side and returns clean JSON.
+  // Used by cinevault.html to show adult search results.
+  if (path === "/eporner") {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.setHeader("Content-Type", "application/json");
+    const qs = new URL(req.url, "http://localhost").searchParams;
+    const q = qs.get("q") || "";
+    const n = Math.min(parseInt(qs.get("n") || "20"), 50);
+    if (!q) { res.end(JSON.stringify({ videos: [] })); return; }
+    try {
+      const epUrl =
+        "https://www.eporner.com/api/v2/video/search/" +
+        "?query=" + encodeURIComponent(q) +
+        "&per_page=" + n +
+        "&thumbsize=big&format=json&lp=en&order=top-rated";
+      const r = await axios.get(epUrl, {
+        headers: { "User-Agent": "Mozilla/5.0", "Accept": "*/*" },
+        timeout: 12000,
+      });
+      const videos = (r.data?.videos || []).map((v) => ({
+        id:       v.id,
+        title:    v.title || v.id,
+        embed:    v.embed,
+        thumb:    v.thumbs?.[2]?.src || v.thumbs?.[0]?.src || v.default_thumb?.src || null,
+        duration: v.length_min ? v.length_min + " min" : null,
+        views:    v.views  || 0,
+        rating:   v.rate   || null,
+        added:    v.added  || null,
+      }));
+      res.end(JSON.stringify({ videos }));
+    } catch (e) {
+      res.statusCode = 502;
+      res.end(JSON.stringify({ videos: [], error: String(e.message) }));
+    }
+    return;
+  }
+
   res.statusCode = 404;
   res.end(JSON.stringify({ error: "not found" }));
 };
