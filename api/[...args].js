@@ -628,16 +628,28 @@ module.exports = async (req, res) => {
         headers: { "User-Agent": "Mozilla/5.0", "Accept": "*/*" },
         timeout: 12000,
       });
-      const videos = (r.data?.videos || []).map((v) => ({
-        id:       v.id,
-        title:    v.title || v.id,
-        embed:    v.embed,
-        thumb:    v.thumbs?.[2]?.src || v.thumbs?.[0]?.src || v.default_thumb?.src || null,
-        duration: v.length_min ? v.length_min + " min" : null,
-        views:    v.views  || 0,
-        rating:   v.rate   || null,
-        added:    v.added  || null,
-      }));
+      const videos = (r.data?.videos || []).map((v) => {
+        // videoSources: pick best quality MP4 direct link
+        const sources = v.videoSources || {};
+        const qualOrder = ["1080p","720p","480p","360p","240p"];
+        let mp4 = null;
+        for (const q of qualOrder) {
+          if (sources[q]) { mp4 = sources[q]; break; }
+        }
+        // fallback: any source
+        if (!mp4) mp4 = Object.values(sources)[0] || null;
+        return {
+          id:       v.id,
+          title:    v.title || v.id,
+          embed:    v.embed,
+          mp4:      mp4,
+          thumb:    v.thumbs?.[2]?.src || v.thumbs?.[0]?.src || v.default_thumb?.src || null,
+          duration: v.length_min ? v.length_min + " min" : null,
+          views:    v.views  || 0,
+          rating:   v.rate   || null,
+          added:    v.added  || null,
+        };
+      });
       res.end(JSON.stringify({ videos }));
     } catch (e) {
       res.statusCode = 502;
