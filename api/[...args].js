@@ -724,6 +724,44 @@ module.exports = async (req, res) => {
     return;
   }
 
+
+  // ── SEAPI — fetches direct HLS/MP4 streams from superembed seapi.link ──
+  if (path === "/seapi") {
+    const qs = new URL(req.url, "http://localhost").searchParams;
+    const tmdbId = qs.get("tmdb") || "";
+    const imdbId = qs.get("imdb") || "";
+    const season = qs.get("s") || "";
+    const episode = qs.get("e") || "";
+    if (!tmdbId && !imdbId) { res.statusCode = 400; res.end(JSON.stringify({error:"id required"})); return; }
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Content-Type", "application/json");
+    try {
+      let apiUrl;
+      if (tmdbId) {
+        apiUrl = season
+          ? `https://seapi.link/?type=tmdb&id=${tmdbId}&season=${season}&episode=${episode}&max_results=3`
+          : `https://seapi.link/?type=tmdb&id=${tmdbId}&max_results=3`;
+      } else {
+        apiUrl = season
+          ? `https://seapi.link/?type=imdb&id=${imdbId}&season=${season}&episode=${episode}&max_results=3`
+          : `https://seapi.link/?type=imdb&id=${imdbId}&max_results=3`;
+      }
+      const r = await axios.get(apiUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+          "Referer": "https://multiembed.mov/",
+          "Origin": "https://multiembed.mov",
+        },
+        timeout: 15000,
+      });
+      res.end(JSON.stringify(r.data));
+    } catch(e) {
+      res.statusCode = 502;
+      res.end(JSON.stringify({error: e.message}));
+    }
+    return;
+  }
+
   res.statusCode = 404;
   res.end(JSON.stringify({ error: "not found" }));
 };
