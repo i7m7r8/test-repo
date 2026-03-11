@@ -84,7 +84,7 @@ async function tmdbSearch(title, type) {
   try {
     const t = type === "series" ? "tv" : "movie";
     const r = await axios.get(
-      \`https://api.themoviedb.org/3/search/\${t}?api_key=\${TMDB_KEY}&query=\${encodeURIComponent(title)}\`,
+      `https://api.themoviedb.org/3/search/\${t}?api_key=\${TMDB_KEY}&query=\${encodeURIComponent(title)}`,
       { timeout: 5000 }
     );
     const res = r.data?.results?.[0];
@@ -92,7 +92,7 @@ async function tmdbSearch(title, type) {
     let imdbId = null;
     try {
       const ext = await axios.get(
-        \`https://api.themoviedb.org/3/\${t}/\${res.id}/external_ids?api_key=\${TMDB_KEY}\`,
+        `https://api.themoviedb.org/3/\${t}/\${res.id}/external_ids?api_key=\${TMDB_KEY}`,
         { timeout: 5000 }
       );
       imdbId = ext.data?.imdb_id || null;
@@ -100,8 +100,8 @@ async function tmdbSearch(title, type) {
     return {
       imdbId,
       name: res.title || res.name || title,
-      poster: res.poster_path ? \`https://image.tmdb.org/t/p/w300\${res.poster_path}\` : null,
-      bg: res.backdrop_path ? \`https://image.tmdb.org/t/p/w780\${res.backdrop_path}\` : null,
+      poster: res.poster_path ? `https://image.tmdb.org/t/p/w300\${res.poster_path}` : null,
+      bg: res.backdrop_path ? `https://image.tmdb.org/t/p/w780\${res.backdrop_path}` : null,
       year: (res.release_date || res.first_air_date || "").slice(0, 4),
       description: res.overview || ""
     };
@@ -111,15 +111,15 @@ async function tmdbSearch(title, type) {
 async function tmdbFindByImdb(imdbId) {
   try {
     const r = await axios.get(
-      \`https://api.themoviedb.org/3/find/\${imdbId}?api_key=\${TMDB_KEY}&external_source=imdb_id\`,
+      `https://api.themoviedb.org/3/find/\${imdbId}?api_key=\${TMDB_KEY}&external_source=imdb_id`,
       { timeout: 5000 }
     );
     const found = r.data?.movie_results?.[0] || r.data?.tv_results?.[0];
     if (!found) return null;
     return {
       name: found.title || found.name || imdbId,
-      poster: found.poster_path ? \`https://image.tmdb.org/t/p/w300\${found.poster_path}\` : null,
-      bg: found.backdrop_path ? \`https://image.tmdb.org/t/p/w780\${found.backdrop_path}\` : null,
+      poster: found.poster_path ? `https://image.tmdb.org/t/p/w300\${found.poster_path}` : null,
+      bg: found.backdrop_path ? `https://image.tmdb.org/t/p/w780\${found.backdrop_path}` : null,
       year: (found.release_date || found.first_air_date || "").slice(0, 4),
       description: found.overview || ""
     };
@@ -129,8 +129,8 @@ async function tmdbFindByImdb(imdbId) {
 // ── apibay search ─────────────────────────────────────────────
 async function tpbSearch(q, cat) {
   const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36";
-  const t1 = \`https://apibay.org/q.php?q=\${encodeURIComponent(q)}&cat=\${cat}\`;
-  const t2 = \`https://apibay.org/q.php?q=\${encodeURIComponent(q)}&cat=0\`;
+  const t1 = `https://apibay.org/q.php?q=\${encodeURIComponent(q)}&cat=\${cat}`;
+  const t2 = `https://apibay.org/q.php?q=\${encodeURIComponent(q)}&cat=0`;
   try {
     const [r1, r2] = await Promise.allSettled([
       axios.get(t1, { timeout: 10000, headers: { "User-Agent": UA } }),
@@ -150,7 +150,7 @@ async function tpbSearch(q, cat) {
       return merged;
     }
   } catch(e) {}
-  const selfProxy = \`https://test-repo-six-sepia.vercel.app/proxy?url=\${encodeURIComponent(t1)}\`;
+  const selfProxy = `https://test-repo-six-sepia.vercel.app/proxy?url=\${encodeURIComponent(t1)}`;
   try {
     const r = await axios.get(selfProxy, { timeout: 12000, headers: { "User-Agent": UA } });
     let d = r.data;
@@ -163,7 +163,7 @@ async function tpbSearch(q, cat) {
 // ── Nyaa RSS ──────────────────────────────────────────────────
 async function nyaaSearch(q) {
   try {
-    const url = \`https://nyaa.si/?page=rss&q=\${encodeURIComponent(q || "anime")}&c=1_2&f=0\`;
+    const url = `https://nyaa.si/?page=rss&q=\${encodeURIComponent(q || "anime")}&c=1_2&f=0`;
     const r = await axios.get(url, { timeout: 10000, headers: { "User-Agent": "Mozilla/5.0" } });
     const items = [];
     for (const block of r.data.split("<item>").slice(1)) {
@@ -181,7 +181,7 @@ async function nyaaSearch(q) {
 // ── Nyaa Sukebei RSS ──────────────────────────────────────────
 async function nyaaSukebeSearch(q) {
   try {
-    const url = \`https://sukebei.nyaa.si/?page=rss&q=\${encodeURIComponent(q || "hentai")}&c=2_2&f=0\`;
+    const url = `https://sukebei.nyaa.si/?page=rss&q=\${encodeURIComponent(q || "hentai")}&c=2_2&f=0`;
     const r = await axios.get(url, { timeout: 10000, headers: { "User-Agent": "Mozilla/5.0" } });
     const items = [];
     for (const block of r.data.split("<item>").slice(1)) {
@@ -217,8 +217,8 @@ function buildStreams(results, refHash) {
     const epNum = epMatch?.[2] ? parseInt(epMatch[2]) - 1 : 0;
     const shortFile = t.name.length > 60 ? t.name.slice(0, 57) + "..." : t.name;
     const stream = {
-      name: \`MultiStream\n\${q}\`,
-      title: \`\${shortFile}\n👤 \${sd} 💾 \${sz}\`,
+      name: `MultiStream\n\${q}`,
+      title: `\${shortFile}\n👤 \${sd} 💾 \${sz}`,
       infoHash: h, fileIdx: epNum, sources: TRACKERS,
       behaviorHints: { notWebReady: false }
     };
@@ -269,7 +269,7 @@ module.exports = async (req, res) => {
             upRes.resume();
             const next = upRes.headers.location.startsWith("http")
               ? upRes.headers.location
-              : \`\${u.protocol}//\${u.host}\${upRes.headers.location}\`;
+              : `\${u.protocol}//\${u.host}\${upRes.headers.location}`;
             return fetchAndPipe(next, redirectCount + 1);
           }
           const fwd = ["content-type","content-length","content-range","accept-ranges","last-modified","etag"];
@@ -333,7 +333,7 @@ module.exports = async (req, res) => {
         const cat = u.searchParams.get("cat") || "0";
         const [r1, r2] = await Promise.allSettled([
           fetchUrl(decoded),
-          cat !== "0" ? fetchUrl(\`https://apibay.org/q.php?q=\${encodeURIComponent(q)}&cat=0\`) : Promise.resolve("[]")
+          cat !== "0" ? fetchUrl(`https://apibay.org/q.php?q=\${encodeURIComponent(q)}&cat=0`) : Promise.resolve("[]")
         ]);
         let arr1 = [], arr2 = [];
         try { arr1 = JSON.parse(r1.status === "fulfilled" ? r1.value : "[]"); } catch(e) {}
@@ -375,9 +375,9 @@ module.exports = async (req, res) => {
           if (!name || seen.has(name.toLowerCase())) continue;
           seen.add(name.toLowerCase());
           const enc = encodeURIComponent(name).replace(/%/g, "_");
-          metas.push({ id: \`ms_\${item.hash}_\${enc}\`, type: "series", name,
-            poster: \`https://via.placeholder.com/300x450/1a0a0a/f97316?text=\${encodeURIComponent(name.slice(0,15))}\`,
-            description: \`🔞 \${quality(item.title)} | 🌱 \${item.seeders} seeds | \${item.size}\`,
+          metas.push({ id: `ms_\${item.hash}_\${enc}`, type: "series", name,
+            poster: `https://via.placeholder.com/300x450/1a0a0a/f97316?text=\${encodeURIComponent(name.slice(0,15))}`,
+            description: `🔞 \${quality(item.title)} | 🌱 \${item.seeders} seeds | \${item.size}`,
             genres: ["Hentai","Adult","Anime"] });
         }
         return respond(res, { metas });
@@ -392,9 +392,9 @@ module.exports = async (req, res) => {
           if (!name || seen.has(name.toLowerCase())) continue;
           seen.add(name.toLowerCase());
           const enc = encodeURIComponent(name).replace(/%/g, "_");
-          metas.push({ id: \`ms_\${t.info_hash.toLowerCase()}_\${enc}\`, type: "movie", name,
-            poster: \`https://via.placeholder.com/300x450/1a0a0a/f97316?text=\${encodeURIComponent(name.slice(0,15))}\`,
-            description: \`🔞 \${quality(t.name)} | 🌱 \${t.seeders} seeds | 💾 \${sizeStr(t.size)}\`,
+          metas.push({ id: `ms_\${t.info_hash.toLowerCase()}_\${enc}`, type: "movie", name,
+            poster: `https://via.placeholder.com/300x450/1a0a0a/f97316?text=\${encodeURIComponent(name.slice(0,15))}`,
+            description: `🔞 \${quality(t.name)} | 🌱 \${t.seeders} seeds | 💾 \${sizeStr(t.size)}`,
             genres: ["Adult"] });
           if (metas.length >= 20) break;
         }
@@ -408,9 +408,9 @@ module.exports = async (req, res) => {
           if (!name || seen.has(name.toLowerCase())) continue;
           seen.add(name.toLowerCase());
           const enc = encodeURIComponent(name).replace(/%/g, "_");
-          metas.push({ id: \`ms_\${item.hash}_\${enc}\`, type: "series", name,
-            poster: \`https://via.placeholder.com/300x450/0f0f1a/e879f9?text=\${encodeURIComponent(name.slice(0,15))}\`,
-            description: \`🎌 \${quality(item.title)} | 🌱 \${item.seeders} seeds | \${item.size}\`,
+          metas.push({ id: `ms_\${item.hash}_\${enc}`, type: "series", name,
+            poster: `https://via.placeholder.com/300x450/0f0f1a/e879f9?text=\${encodeURIComponent(name.slice(0,15))}`,
+            description: `🎌 \${quality(item.title)} | 🌱 \${item.seeders} seeds | \${item.size}`,
             genres: ["Anime"] });
         }
         return respond(res, { metas });
@@ -427,10 +427,10 @@ module.exports = async (req, res) => {
         if (!name || seen.has(name.toLowerCase())) continue;
         seen.add(name.toLowerCase());
         metas.push({
-          id: \`ms_\${t.info_hash.toLowerCase()}_\${encodeURIComponent(name).replace(/%/g,"_")}\`,
+          id: `ms_\${t.info_hash.toLowerCase()}_\${encodeURIComponent(name).replace(/%/g,"_")}`,
           type, name,
-          poster: \`https://via.placeholder.com/300x450/0f0f1a/818cf8?text=\${encodeURIComponent(name.slice(0,15))}\`,
-          description: \`\${quality(t.name)} | 🌱 \${t.seeders} seeds | 💾 \${sizeStr(t.size)}\`,
+          poster: `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=\${encodeURIComponent(name.slice(0,15))}`,
+          description: `\${quality(t.name)} | 🌱 \${t.seeders} seeds | 💾 \${sizeStr(t.size)}`,
           year: (t.name.match(/\b(19|20)\d{2}\b/) || [])[0] || "", genres: []
         });
         if (metas.length >= 20) break;
@@ -449,14 +449,14 @@ module.exports = async (req, res) => {
         ? decodeURIComponent(parts.slice(1).join("_").replace(/_/g, "%"))
         : parts[0].slice(0, 12);
       return respond(res, { meta: { id, type, name,
-        poster: \`https://via.placeholder.com/300x450/0f0f1a/818cf8?text=\${encodeURIComponent(name.slice(0,15))}\`,
+        poster: `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=\${encodeURIComponent(name.slice(0,15))}`,
         description: name, genres: [] }});
     }
     if (id.startsWith("tt")) {
       const info = await tmdbFindByImdb(id);
       if (info) {
         return respond(res, { meta: { id, type, name: info.name,
-          poster: info.poster || \`https://via.placeholder.com/300x450/0f0f1a/818cf8?text=\${encodeURIComponent(info.name.slice(0,15))}\`,
+          poster: info.poster || `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=\${encodeURIComponent(info.name.slice(0,15))}`,
           background: info.bg || info.poster, description: info.description, year: info.year, genres: [] }});
       }
     }
@@ -492,8 +492,8 @@ module.exports = async (req, res) => {
     const cat = type === "movie" ? "207" : "205";
     let results = [];
     if (season !== null && episode !== null) {
-      const epQ     = \`\${titleQuery} S\${String(season).padStart(2,"0")}E\${String(episode).padStart(2,"0")}\`;
-      const seasonQ = \`\${titleQuery} S\${String(season).padStart(2,"0")}\`;
+      const epQ     = `\${titleQuery} S\${String(season).padStart(2,"0")}E\${String(episode).padStart(2,"0")}`;
+      const seasonQ = `\${titleQuery} S\${String(season).padStart(2,"0")}`;
       const [r1, r2] = await Promise.allSettled([tpbSearch(epQ, cat), tpbSearch(seasonQ, cat)]);
       const seen = new Set(); const merged = [];
       for (const r of [r1, r2]) {
@@ -512,7 +512,7 @@ module.exports = async (req, res) => {
     }
     const streams = buildStreams(results, refHash);
     if (!streams.length) {
-      return respond(res, { streams: [{ name: "MultiStream", title: \`\${titleQuery}\n⚡ Play\`,
+      return respond(res, { streams: [{ name: "MultiStream", title: `\${titleQuery}\n⚡ Play`,
         infoHash: refHash || "0000000000000000000000000000000000000000",
         sources: TRACKERS, behaviorHints: { notWebReady: false } }]});
     }
@@ -579,8 +579,8 @@ module.exports = async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Content-Type", "application/json");
     try {
-      const base = tmdbId ? \`https://seapi.link/?type=tmdb&id=\${tmdbId}\` : \`https://seapi.link/?type=imdb&id=\${imdbId}\`;
-      const apiUrl = season ? base + \`&season=\${season}&episode=\${episode}&max_results=3\` : base + "&max_results=3";
+      const base = tmdbId ? `https://seapi.link/?type=tmdb&id=\${tmdbId}` : `https://seapi.link/?type=imdb&id=\${imdbId}`;
+      const apiUrl = season ? base + `&season=\${season}&episode=\${episode}&max_results=3` : base + "&max_results=3";
       const r = await axios.get(apiUrl, {
         headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://multiembed.mov/", "Origin": "https://multiembed.mov" },
         timeout: 15000,
@@ -630,9 +630,9 @@ module.exports = async (req, res) => {
       let embedUrl;
       if (type === "tv") {
         if (!season || !episode) { res.statusCode = 400; res.end(JSON.stringify({ error: "s and e required for tv" })); return; }
-        embedUrl = \`https://vidsrc.net/embed/tv?tmdb=\${tmdbId}&season=\${season}&episode=\${episode}\`;
+        embedUrl = `https://vidsrc.net/embed/tv?tmdb=\${tmdbId}&season=\${season}&episode=\${episode}`;
       } else {
-        embedUrl = \`https://vidsrc.net/embed/movie?tmdb=\${tmdbId}\`;
+        embedUrl = `https://vidsrc.net/embed/movie?tmdb=\${tmdbId}`;
       }
 
       const embedRes = await axios.get(embedUrl, {
@@ -642,7 +642,7 @@ module.exports = async (req, res) => {
       const embedHtml = typeof embedRes.data === "string" ? embedRes.data : JSON.stringify(embedRes.data);
 
       const baseDomMatch = embedHtml.match(/https?:\/\/([^/]+)\/embed\//);
-      const BASEDOM = baseDomMatch ? \`https://\${baseDomMatch[1]}\` : "https://vidsrc.net";
+      const BASEDOM = baseDomMatch ? `https://\${baseDomMatch[1]}` : "https://vidsrc.net";
 
       const serverRegex = /data-hash="([^"]+)"[^>]*(?:data-id="([^"]+)")?[^>]*>([^<]*)</g;
       const servers = [];
@@ -671,7 +671,7 @@ module.exports = async (req, res) => {
       const rcpResults = await Promise.allSettled(
         servers.slice(0, 3).map(async (srv) => {
           try {
-            const rcpUrl = \`\${BASEDOM}/rcp/\${srv.dataHash}\`;
+            const rcpUrl = `\${BASEDOM}/rcp/\${srv.dataHash}`;
             const rcpRes = await axios.get(rcpUrl, {
               headers: { "User-Agent": UA, "Referer": embedUrl, "X-Requested-With": "XMLHttpRequest" },
               timeout: 6000,
