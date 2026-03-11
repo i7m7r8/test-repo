@@ -716,6 +716,74 @@ module.exports = async (req, res) => {
     return;
   }
 
+  // ── /direct-stream — unified stream extractor ─────────────────
+  // GET /direct-stream?tmdb=ID&type=movie|tv&s=1&e=1
+  // Tries seapi.link then vidsrc, normalizes to { streams:[{url,quality,provider}] }
+  if (path === "/direct-stream") {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Content-Type", "application/json");
+    const qs  = new URL(req.url, "http://localhost").searchParams;
+    const tmdbId  = qs.get("tmdb") || "";
+    const type    = qs.get("type") || "movie";
+    const season  = qs.get("s") || "";
+    const episode = qs.get("e") || "";
+    if (!tmdbId) { res.statusCode = 400; res.end(JSON.stringify({ error: "tmdb required" })); return; }
+
+    const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+    const streams = [];
+
+    // ── 1. seapi.link ──
+    try {
+      const base = `https://seapi.link/?type=tmdb&id=${tmdbId}`;
+      const url  = season ? `${base}&season=${season}&episode=${episode}&max_results=5` : `${base}&max_results=5`;
+      const r = await axios.get(url, { headers: { "User-Agent": UA, "Referer": "https://multiembed.mov/", "Origin": "https://multiembed.mov" }, timeout: 12000 });
+      const data = r.data || {};
+      const list = data.streams || (Array.isArray(data) ? data : []);
+      for (const s of list) {
+        const u = s.url || s.stream_url || s.src || "";
+        if (u && /^https?:\/\//.test(u)) {
+          streams.push({ url: u, quality: s.quality || "auto", provider: "seapi", referer: s.referer || "https://multiembed.mov/" });
+        }
+      }
+    } catch(e) {}
+
+    // ── 2. vidsrc.net (only if seapi found nothing) ──
+    if (!streams.length) {
+      try {
+        let embedUrl = type === "tv" && season
+          ? `https://vidsrc.net/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`
+          : `https://vidsrc.net/embed/movie?tmdb=${tmdbId}`;
+        const embedRes = await axios.get(embedUrl, { headers: { "User-Agent": UA, "Referer": "https://vidsrc.net/" }, timeout: 8000 });
+        const html = typeof embedRes.data === "string" ? embedRes.data : "";
+        const m3u8 = html.match(/https?:\/\/[^"'\s]+\.m3u8[^"'\s]*/);
+        if (m3u8) streams.push({ url: m3u8[0], quality: "auto", provider: "vidsrc.net", referer: "https://vidsrc.net/" });
+      } catch(e) {}
+    }
+
+    // ── 3. vidsrc.me via embed scrape ──
+    if (!streams.length) {
+      try {
+        const imdbLookup = await axios.get(
+          `https://api.themoviedb.org/3/movie/${tmdbId}/external_ids?api_key=${TMDB_KEY}`,
+          { timeout: 5000 }
+        ).catch(() => axios.get(`https://api.themoviedb.org/3/tv/${tmdbId}/external_ids?api_key=${TMDB_KEY}`, { timeout: 5000 }));
+        const imdbId = imdbLookup?.data?.imdb_id;
+        if (imdbId) {
+          let embedUrl = type === "tv" && season
+            ? `https://vidsrc.me/embed/tv?imdb=${imdbId}&season=${season}&episode=${episode}`
+            : `https://vidsrc.me/embed/movie?imdb=${imdbId}`;
+          const r = await axios.get(embedUrl, { headers: { "User-Agent": UA, "Referer": "https://vidsrc.me/" }, timeout: 8000 });
+          const html = typeof r.data === "string" ? r.data : "";
+          const m3u8 = html.match(/https?:\/\/[^"'\s]+\.m3u8[^"'\s]*/);
+          if (m3u8) streams.push({ url: m3u8[0], quality: "auto", provider: "vidsrc.me", referer: "https://vidsrc.me/" });
+        }
+      } catch(e) {}
+    }
+
+    res.end(JSON.stringify({ streams, count: streams.length }));
+    return;
+  }
+
   res.statusCode = 404;
   res.end(JSON.stringify({ error: "not found" }));
 };
