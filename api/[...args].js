@@ -716,154 +716,240 @@ module.exports = async (req, res) => {
     return;
   }
 
-  // ── /direct-stream — vidsrc.ts compatible extractor ──────────
+  // ── /direct-stream — exact vidsrc.ts port ────────────────────
   // GET /direct-stream?tmdb=ID&type=movie|tv&s=1&e=1
-  // Returns: { streams: [{ stream, name, image, mediaId, provider }] }
-  // `stream` field matches vidsrc.ts return type exactly
+  // Ports https://github.com/cool-dev-guy/vidsrc.ts exactly
+  // Returns: [{ name, image, mediaId, stream, referer }]
   if (path === "/direct-stream") {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Content-Type", "application/json");
-    const qs     = new URL(req.url, "http://localhost").searchParams;
+    const qs      = new URL(req.url, "http://localhost").searchParams;
     const tmdbId  = qs.get("tmdb") || "";
     const type    = qs.get("type") || "movie";
     const season  = parseInt(qs.get("s") || "0");
     const episode = parseInt(qs.get("e") || "0");
     if (!tmdbId) { res.statusCode = 400; res.end(JSON.stringify({ error: "tmdb required" })); return; }
 
-    const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36";
-
-    // ── vidsrc.ts core logic (inlined) ────────────────────────
-    // Based on https://github.com/cool-dev-guy/vidsrc.ts
-    // Uses vidsrc.me -> gets media page -> finds /rcp/ src -> decodes -> m3u8
-
-    function decodeBase64Url(str) {
-      // vidsrc uses a custom base64 with swapped chars
-      const map = { "-": "+", "_": "/" };
-      const b64 = str.replace(/[-_]/g, m => map[m]);
-      return Buffer.from(b64, "base64").toString("utf8");
+    // ── Exact port of decoder.ts ───────────────────────────────
+    function bMGyx71TzQLfdonN(s) {
+      const chunks = [];
+      for (let i = 0; i < s.length; i += 3) chunks.push(s.slice(i, i + 3));
+      return chunks.reverse().join("");
+    }
+    function Iry9MQXnLs(s) {
+      const key = "pWB9V)[*4I`nJpp?ozyB~dbr9yt!_n4u";
+      const hex = s.match(/.{1,2}/g).map(h => String.fromCharCode(parseInt(h, 16))).join("");
+      let xored = "";
+      for (let i = 0; i < hex.length; i++)
+        xored += String.fromCharCode(hex.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+      let shifted = "";
+      for (let i = 0; i < xored.length; i++)
+        shifted += String.fromCharCode(xored.charCodeAt(i) - 3);
+      return Buffer.from(shifted, "base64").toString("utf8");
+    }
+    function IGLImMhWrI(s) {
+      const rev = s.split("").reverse().join("");
+      const rot = rev.replace(/[a-zA-Z]/g, c =>
+        String.fromCharCode(c.charCodeAt(0) + (c.toLowerCase() < "n" ? 13 : -13)));
+      const rev2 = rot.split("").reverse().join("");
+      return Buffer.from(rev2, "base64").toString("utf8");
+    }
+    function GTAxQyTyBx(s) {
+      const rev = s.split("").reverse().join("");
+      let evens = "";
+      for (let i = 0; i < rev.length; i += 2) evens += rev[i];
+      return Buffer.from(evens, "base64").toString("utf8");
+    }
+    function C66jPHx8qu(s) {
+      const key = "X9a(O;FMV2-7VO5x;Ao:dN1NoFs?j,";
+      const rev = s.split("").reverse().join("");
+      const hex = rev.match(/.{1,2}/g).map(h => String.fromCharCode(parseInt(h, 16))).join("");
+      let out = "";
+      for (let i = 0; i < hex.length; i++)
+        out += String.fromCharCode(hex.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+      return out;
+    }
+    function MyL1IRSfHe(s) {
+      const rev = s.split("").reverse().join("");
+      let shifted = "";
+      for (let i = 0; i < rev.length; i++)
+        shifted += String.fromCharCode(rev.charCodeAt(i) - 1);
+      let hex = "";
+      for (let i = 0; i < shifted.length; i += 2)
+        hex += String.fromCharCode(parseInt(shifted.substr(i, 2), 16));
+      return hex;
+    }
+    function detdj7JHiK(s) {
+      const key = `3SAY~#%Y(V%>5d/Yg"$G[Lh1rK4a;7ok`;
+      const sliced = s.slice(10, -16);
+      const decoded = Buffer.from(sliced, "base64").toString("binary");
+      const k = key.repeat(Math.ceil(decoded.length / key.length)).substring(0, decoded.length);
+      let out = "";
+      for (let i = 0; i < decoded.length; i++)
+        out += String.fromCharCode(decoded.charCodeAt(i) ^ k.charCodeAt(i));
+      return out;
+    }
+    function laM1dAi3vO(s) {
+      const rev = s.split("").reverse().join("").replace(/-/g, "+").replace(/_/g, "/");
+      const decoded = Buffer.from(rev, "base64").toString("binary");
+      let out = "";
+      for (let i = 0; i < decoded.length; i++)
+        out += String.fromCharCode(decoded.charCodeAt(i) - 5);
+      return out;
+    }
+    function GuxKGDsA2T(s) {
+      const rev = s.split("").reverse().join("").replace(/-/g, "+").replace(/_/g, "/");
+      const decoded = Buffer.from(rev, "base64").toString("binary");
+      let out = "";
+      for (let i = 0; i < decoded.length; i++)
+        out += String.fromCharCode(decoded.charCodeAt(i) - 7);
+      return out;
+    }
+    function LXVUMCoAHJ(s) {
+      const rev = s.split("").reverse().join("").replace(/-/g, "+").replace(/_/g, "/");
+      const decoded = Buffer.from(rev, "base64").toString("binary");
+      let out = "";
+      for (let i = 0; i < decoded.length; i++)
+        out += String.fromCharCode(decoded.charCodeAt(i) - 3);
+      return out;
+    }
+    function nZlUnj2VSo(s) {
+      const map = {x:"a",y:"b",z:"c",a:"d",b:"e",c:"f",d:"g",e:"h",f:"i",g:"j",h:"k",i:"l",j:"m",k:"n",l:"o",m:"p",n:"q",o:"r",p:"s",q:"t",r:"u",s:"v",t:"w",u:"x",v:"y",w:"z",X:"A",Y:"B",Z:"C",A:"D",B:"E",C:"F",D:"G",E:"H",F:"I",G:"J",H:"K",I:"L",J:"M",K:"N",L:"O",M:"P",N:"Q",O:"R",P:"S",Q:"T",R:"U",S:"V",T:"W",U:"X",V:"Y",W:"Z"};
+      return s.replace(/[xyzabcdefghijklmnopqrstuvwXYZABCDEFGHIJKLMNOPQRSTUVW]/g, c => map[c] || c);
+    }
+    function decrypt(param, type) {
+      switch(type) {
+        case "LXVUMCoAHJ": return LXVUMCoAHJ(param);
+        case "GuxKGDsA2T": return GuxKGDsA2T(param);
+        case "laM1dAi3vO": return laM1dAi3vO(param);
+        case "nZlUnj2VSo": return nZlUnj2VSo(param);
+        case "Iry9MQXnLs": return Iry9MQXnLs(param);
+        case "IGLImMhWrI": return IGLImMhWrI(param);
+        case "GTAxQyTyBx": return GTAxQyTyBx(param);
+        case "C66jPHx8qu": return C66jPHx8qu(param);
+        case "MyL1IRSfHe": return MyL1IRSfHe(param);
+        case "detdj7JHiK": return detdj7JHiK(param);
+        case "bMGyx71TzQLfdonN": return bMGyx71TzQLfdonN(param);
+        default: return null;
+      }
     }
 
-    function vidsrcDecrypt(str) {
-      // vidsrc XOR cipher used in newer versions
+    // ── Exact port of PRORCPhandler ────────────────────────────
+    async function PRORCPhandler(prorcp, BASEDOM) {
       try {
-        const key = "8z5Ag5wgagfjg7tf";
-        const data = Buffer.from(str, "base64");
-        const out = [];
-        for (let i = 0; i < data.length; i++) {
-          out.push(data[i] ^ key.charCodeAt(i % key.length));
-        }
-        return Buffer.from(out).toString("utf8");
-      } catch(e) { return ""; }
-    }
-
-    async function fetchVidsrc(tmdbId, type, season, episode) {
-      const results = [];
-      try {
-        // Step 1: get embed page
-        const embedUrl = type === "tv"
-          ? `https://vidsrc.me/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`
-          : `https://vidsrc.me/embed/movie?tmdb=${tmdbId}`;
-
-        const embedRes = await axios.get(embedUrl, {
-          headers: { "User-Agent": UA, "Referer": "https://vidsrc.me/" },
+        const r = await axios.get(`${BASEDOM}/prorcp/${prorcp}`, {
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": `${BASEDOM}/` },
           timeout: 10000
         });
-        const embedHtml = embedRes.data || "";
+        const html = r.data || "";
 
-        // Step 2: find all server data-hash values
-        const hashMatches = [...embedHtml.matchAll(/data-hash="([^"]+)"/g)];
-        if (!hashMatches.length) return results;
-
-        const baseDom = (embedHtml.match(/https?:\/\/([^/]+)\/embed\//) || [])[0] || "https://vidsrc.me";
-        const baseUrl = baseDom.replace(/\/embed\/.*/, "");
-
-        // Step 3: for each server, fetch /rcp/{hash} and decode the stream URL
-        for (const [, hash] of hashMatches.slice(0, 3)) {
-          try {
-            const rcpUrl = `${baseUrl}/rcp/${hash}`;
-            const rcpRes = await axios.get(rcpUrl, {
-              headers: { "User-Agent": UA, "Referer": embedUrl, "X-Requested-With": "XMLHttpRequest" },
-              timeout: 8000
-            });
-            const rcpHtml = rcpRes.data || "";
-
-            // Try direct m3u8 in page
-            const m3u8Direct = (rcpHtml.match(/https?:\/\/[^"'\s]+\.m3u8[^"'\s]*/i) || [])[0];
-            if (m3u8Direct) {
-              results.push({ stream: m3u8Direct, name: "VidSrc", image: "", mediaId: tmdbId, provider: "vidsrc.me" });
-              continue;
-            }
-
-            // Try encoded src field -> leads to pro.vidsrc page with encrypted m3u8
-            const srcMatch = rcpHtml.match(/src:\s*['"]([^'"]+)['"]/);
-            if (!srcMatch) continue;
-            const proUrl = srcMatch[1].startsWith("//") ? "https:" + srcMatch[1] : srcMatch[1];
-
-            const proRes = await axios.get(proUrl, {
-              headers: { "User-Agent": UA, "Referer": baseUrl + "/" },
-              timeout: 8000
-            });
-            const proHtml = proRes.data || "";
-
-            // Try plain m3u8 in pro page
-            const m3u8Pro = (proHtml.match(/https?:\/\/[^"'\s]+\.m3u8[^"'\s]*/i) || [])[0];
-            if (m3u8Pro) {
-              results.push({ stream: m3u8Pro, name: "VidSrc Pro", image: "", mediaId: tmdbId, provider: "vidsrc.me" });
-              continue;
-            }
-
-            // Try encrypted data field + JS key
-            const encData = (proHtml.match(/data:\s*['"]([A-Za-z0-9+/=_-]+)['"]/) || [])[1];
-            if (!encData) continue;
-
-            // Try base64 decode first
-            const decoded1 = decodeBase64Url(encData);
-            if (decoded1.includes(".m3u8") || decoded1.includes(".mp4")) {
-              const u = decoded1.startsWith("//") ? "https:" + decoded1 : decoded1;
-              results.push({ stream: u, name: "VidSrc Decoded", image: "", mediaId: tmdbId, provider: "vidsrc.me" });
-              continue;
-            }
-
-            // Try XOR decrypt
-            const decoded2 = vidsrcDecrypt(encData);
-            if (decoded2.includes(".m3u8") || decoded2.includes(".mp4")) {
-              const u = decoded2.startsWith("//") ? "https:" + decoded2 : decoded2;
-              results.push({ stream: u, name: "VidSrc XOR", image: "", mediaId: tmdbId, provider: "vidsrc.me" });
-              continue;
-            }
-          } catch(e) { continue; }
+        // Find the last non-cpt JS script
+        const scripts = [...html.matchAll(/<script\s+src="\/([^"]*\.js)\?_=([^"]*)"><\/script>/gm)];
+        if (!scripts.length) return null;
+        let scriptPath = null;
+        const last = scripts[scripts.length - 1][0];
+        if (last.includes("cpt.js") && scripts.length >= 2) {
+          scriptPath = scripts[scripts.length - 2][1] + "?_=" + scripts[scripts.length - 2][2];
+        } else {
+          scriptPath = scripts[scripts.length - 1][1] + "?_=" + scripts[scripts.length - 1][2];
         }
-      } catch(e) {}
+
+        const jsRes = await axios.get(`${BASEDOM}/${scriptPath}`, {
+          headers: { "Referer": `${BASEDOM}/` }, timeout: 8000
+        });
+        const jsCode = jsRes.data || "";
+
+        // Extract decrypt function name and param — exact regex from vidsrc.ts
+        const decryptRegex = /\{\}\}window\[([^"]+)\("([^"]+)"\)\]/;
+        const decryptMatches = jsCode.match(decryptRegex);
+        if (!decryptMatches || decryptMatches.length < 3) return null;
+
+        const fnType  = decryptMatches[1].trim();  // e.g. "bMGyx71TzQLfdonN"
+        const fnParam = decryptMatches[2].trim();  // the encoded id string
+
+        // Get the element id by decrypting fnParam with fnType
+        const elemId = decrypt(fnParam, fnType);
+        if (!elemId) return null;
+
+        // Get the data from the element with that id
+        const idMatch = html.match(new RegExp(`id="${elemId}"[^>]*>([^<]*)<`));
+        if (!idMatch) return null;
+        const encData = idMatch[1].trim();
+
+        // Decrypt data using fnParam as the type key
+        const result = decrypt(encData, fnParam);
+        return result;
+      } catch(e) { return null; }
+    }
+
+    // ── Exact port of tmdbScrape ───────────────────────────────
+    async function tmdbScrape(tmdbId, type, season, episode) {
+      let BASEDOM = "https://whisperingauroras.com";
+      const url = type === "movie"
+        ? `https://vidsrc.net/embed/movie?tmdb=${tmdbId}`
+        : `https://vidsrc.net/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`;
+
+      const embedRes = await axios.get(url, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          "Referer": "https://vidsrc.net/" },
+        timeout: 12000
+      });
+      const html = embedRes.data || "";
+
+      // Parse BASEDOM from iframe src (same as serversLoad)
+      const iframeSrc = (html.match(/iframe[^>]+src=["']([^"']+)["']/i) || [])[1] || "";
+      if (iframeSrc) {
+        try {
+          const base = iframeSrc.startsWith("//") ? "https:" + iframeSrc : iframeSrc;
+          BASEDOM = new URL(base).origin;
+        } catch(e) {}
+      }
+
+      // Parse servers — .serversList .server elements with data-hash
+      const serverMatches = [...html.matchAll(/class="server[^"]*"[^>]*data-hash="([^"]+)"/g)];
+      // also try reverse attr order
+      const serverMatches2 = [...html.matchAll(/data-hash="([^"]+)"[^>]*class="server/g)];
+      const hashes = [...new Set([
+        ...serverMatches.map(m => m[1]),
+        ...serverMatches2.map(m => m[1])
+      ])].filter(Boolean);
+
+      if (!hashes.length) return [];
+
+      const results = [];
+      await Promise.all(hashes.slice(0, 3).map(async (hash) => {
+        try {
+          const rcpRes = await axios.get(`${BASEDOM}/rcp/${hash}`, {
+            headers: { "User-Agent": "Mozilla/5.0", "Referer": url }, timeout: 8000
+          });
+          const rcpHtml = rcpRes.data || "";
+
+          // rcpGrabber: find src: '...'
+          const srcMatch = rcpHtml.match(/src:\s*'([^']*)'/);
+          if (!srcMatch) return;
+          const srcData = srcMatch[1];
+
+          if (srcData.startsWith("/prorcp/")) {
+            const stream = await PRORCPhandler(srcData.replace("/prorcp/", ""), BASEDOM);
+            if (stream && (stream.includes(".m3u8") || stream.includes(".mp4"))) {
+              const finalUrl = stream.startsWith("//") ? "https:" + stream : stream;
+              results.push({ name: "VidSrc", image: "", mediaId: tmdbId, stream: finalUrl, referer: BASEDOM });
+            }
+          }
+        } catch(e) {}
+      }));
+
       return results;
     }
 
-    // ── Run all extractors in parallel ────────────────────────
-    const [vidsrcStreams, seapiStreams] = await Promise.allSettled([
-      fetchVidsrc(tmdbId, type, season, episode),
-      // seapi.link as backup
-      axios.get(
-        season
-          ? `https://seapi.link/?type=tmdb&id=${tmdbId}&season=${season}&episode=${episode}&max_results=3`
-          : `https://seapi.link/?type=tmdb&id=${tmdbId}&max_results=3`,
-        { headers: { "User-Agent": UA, "Referer": "https://multiembed.mov/", "Origin": "https://multiembed.mov" }, timeout: 12000 }
-      ).then(r => {
-        const list = r.data?.streams || (Array.isArray(r.data) ? r.data : []);
-        return list.map(s => ({
-          stream: s.stream || s.url || s.stream_url || s.src || "",
-          name: s.name || "SeAPI",
-          image: s.image || "",
-          mediaId: tmdbId,
-          provider: "seapi.link"
-        })).filter(s => s.stream && /^https?:\/\//.test(s.stream));
-      }).catch(() => [])
-    ]);
-
-    const streams = [
-      ...(vidsrcStreams.status === "fulfilled" ? vidsrcStreams.value : []),
-      ...(seapiStreams.status === "fulfilled" ? seapiStreams.value : []),
-    ].filter(s => s.stream && /^https?:\/\//.test(s.stream));
-
-    res.end(JSON.stringify({ streams, count: streams.length }));
+    try {
+      const streams = await tmdbScrape(tmdbId, type, season, episode);
+      res.end(JSON.stringify(streams.length ? streams : []));
+    } catch(e) {
+      res.statusCode = 502;
+      res.end(JSON.stringify({ error: e.message }));
+    }
     return;
   }
 
