@@ -669,65 +669,52 @@ module.exports = async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("X-Frame-Options", "ALLOWALL");
+    res.setHeader("Content-Security-Policy", "");
     try {
       const r = await axios.get(target, {
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           "Referer": "https://www.2embed.cc/",
           "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
         },
         timeout: 15000,
         maxRedirects: 5,
       });
       let html = r.data || "";
-      // Inject CSS to hide share/social buttons — targets JW Player and common share elements
-      const hideCSS = `<style>
-        .jw-icon-sharing, .jw-sharing-skin, .jw-button-container .jw-icon-sharing,
-        [class*="share"]:not(video), [id*="share"]:not(video),
-        [class*="social"]:not(video), [id*="social"]:not(video),
-        a[href*="facebook"], a[href*="twitter"], a[href*="whatsapp"],
-        button[aria-label*="hare"], [data-sharing], .sharing-overlay,
-        .jw-controlbar .jw-icon-sharing { 
-          display:none!important; 
-          visibility:hidden!important; 
-          opacity:0!important; 
-          pointer-events:none!important; 
-          width:0!important; 
-          height:0!important; 
+      // Set base href so all relative URLs resolve correctly to 2embed
+      const baseTag = '<base href="https://www.2embed.cc/">';
+      // Inject base tag + share blocker CSS right after <head>
+      const inject = baseTag + `<style>
+        .jw-icon-sharing,.jw-sharing-skin,.jw-controlbar .jw-icon-sharing,
+        [class*="share"],[class*="Share"],[id*="share"],[id*="Share"],
+        [class*="social"],[id*="social"],[data-sharing],
+        a[href*="facebook.com/sharer"],a[href*="twitter.com/intent"],
+        a[href*="whatsapp"],a[href*="t.me/share"],
+        .sharing-overlay,.share-overlay,.share-box {
+          display:none!important;visibility:hidden!important;
+          opacity:0!important;pointer-events:none!important;
+          width:0!important;height:0!important;max-width:0!important;max-height:0!important;
         }
       </style>`;
-      // Also inject a MutationObserver script to catch dynamically added share buttons
-      const hideJS = `<script>
-        (function() {
-          function nuke() {
-            document.querySelectorAll([
-              '[class*="share"]','[id*="share"]',
-              '[class*="social"]','[id*="social"]',
-              '.jw-icon-sharing','.jw-sharing-skin',
-              'a[href*="facebook"]','a[href*="twitter"]'
-            ].join(",")).forEach(function(el) {
-              if (el.tagName !== "VIDEO" && el.tagName !== "SOURCE") {
-                el.style.cssText = "display:none!important;width:0!important;height:0!important;";
-              }
-            });
-          }
-          nuke();
-          setInterval(nuke, 800);
-          var obs = new MutationObserver(nuke);
-          obs.observe(document.documentElement, {childList:true, subtree:true});
-        })();
-      <\/script>`;
-      // Inject before </head> or at start
-      if (html.includes("</head>")) {
-        html = html.replace("</head>", hideCSS + "</head>");
+      if (html.includes("<head>")) {
+        html = html.replace("<head>", "<head>" + inject);
+      } else if (html.includes("<head ")) {
+        html = html.replace(/<head[^>]*>/, m => m + inject);
       } else {
-        html = hideCSS + html;
+        html = inject + html;
       }
-      // Inject JS before </body>
+      // MutationObserver script before </body>
+      const nukeJS = `<script>(function(){
+        var sel = '.jw-icon-sharing,.jw-sharing-skin,[class*="share"],[id*="share"],[class*="Share"],[id*="Share"],[class*="social"],[id*="social"],[data-sharing],a[href*="facebook.com/sharer"],a[href*="twitter.com/intent"]';
+        function nuke(){document.querySelectorAll(sel).forEach(function(el){if(el.tagName!=="VIDEO"&&el.tagName!=="SOURCE"&&el.tagName!=="BODY"&&el.tagName!=="HTML"){el.style.setProperty("display","none","important");el.style.setProperty("visibility","hidden","important");}});}
+        nuke();setInterval(nuke,300);
+        new MutationObserver(nuke).observe(document.documentElement,{childList:true,subtree:true});
+      })();<\/script>`;
       if (html.includes("</body>")) {
-        html = html.replace("</body>", hideJS + "</body>");
+        html = html.replace("</body>", nukeJS + "</body>");
       } else {
-        html = html + hideJS;
+        html += nukeJS;
       }
       res.end(html);
     } catch(e) {
