@@ -84,7 +84,7 @@ async function tmdbSearch(title, type) {
   try {
     const t = type === "series" ? "tv" : "movie";
     const r = await axios.get(
-      `https://api.themoviedb.org/3/search/${t}?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}`,
+      `https://api.themoviedb.org/3/search/\${t}?api_key=\${TMDB_KEY}&query=\${encodeURIComponent(title)}`,
       { timeout: 5000 }
     );
     const res = r.data?.results?.[0];
@@ -92,7 +92,7 @@ async function tmdbSearch(title, type) {
     let imdbId = null;
     try {
       const ext = await axios.get(
-        `https://api.themoviedb.org/3/${t}/${res.id}/external_ids?api_key=${TMDB_KEY}`,
+        `https://api.themoviedb.org/3/\${t}/\${res.id}/external_ids?api_key=\${TMDB_KEY}`,
         { timeout: 5000 }
       );
       imdbId = ext.data?.imdb_id || null;
@@ -100,8 +100,8 @@ async function tmdbSearch(title, type) {
     return {
       imdbId,
       name: res.title || res.name || title,
-      poster: res.poster_path ? `https://image.tmdb.org/t/p/w300${res.poster_path}` : null,
-      bg: res.backdrop_path ? `https://image.tmdb.org/t/p/w780${res.backdrop_path}` : null,
+      poster: res.poster_path ? `https://image.tmdb.org/t/p/w300\${res.poster_path}` : null,
+      bg: res.backdrop_path ? `https://image.tmdb.org/t/p/w780\${res.backdrop_path}` : null,
       year: (res.release_date || res.first_air_date || "").slice(0, 4),
       description: res.overview || ""
     };
@@ -111,15 +111,15 @@ async function tmdbSearch(title, type) {
 async function tmdbFindByImdb(imdbId) {
   try {
     const r = await axios.get(
-      `https://api.themoviedb.org/3/find/${imdbId}?api_key=${TMDB_KEY}&external_source=imdb_id`,
+      `https://api.themoviedb.org/3/find/\${imdbId}?api_key=\${TMDB_KEY}&external_source=imdb_id`,
       { timeout: 5000 }
     );
     const found = r.data?.movie_results?.[0] || r.data?.tv_results?.[0];
     if (!found) return null;
     return {
       name: found.title || found.name || imdbId,
-      poster: found.poster_path ? `https://image.tmdb.org/t/p/w300${found.poster_path}` : null,
-      bg: found.backdrop_path ? `https://image.tmdb.org/t/p/w780${found.backdrop_path}` : null,
+      poster: found.poster_path ? `https://image.tmdb.org/t/p/w300\${found.poster_path}` : null,
+      bg: found.backdrop_path ? `https://image.tmdb.org/t/p/w780\${found.backdrop_path}` : null,
       year: (found.release_date || found.first_air_date || "").slice(0, 4),
       description: found.overview || ""
     };
@@ -129,8 +129,8 @@ async function tmdbFindByImdb(imdbId) {
 // ── apibay search ─────────────────────────────────────────────
 async function tpbSearch(q, cat) {
   const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36";
-  const t1 = `https://apibay.org/q.php?q=${encodeURIComponent(q)}&cat=${cat}`;
-  const t2 = `https://apibay.org/q.php?q=${encodeURIComponent(q)}&cat=0`;
+  const t1 = `https://apibay.org/q.php?q=\${encodeURIComponent(q)}&cat=\${cat}`;
+  const t2 = `https://apibay.org/q.php?q=\${encodeURIComponent(q)}&cat=0`;
   try {
     const [r1, r2] = await Promise.allSettled([
       axios.get(t1, { timeout: 10000, headers: { "User-Agent": UA } }),
@@ -150,7 +150,7 @@ async function tpbSearch(q, cat) {
       return merged;
     }
   } catch(e) {}
-  const selfProxy = `https://test-repo-six-sepia.vercel.app/proxy?url=${encodeURIComponent(t1)}`;
+  const selfProxy = `https://test-repo-six-sepia.vercel.app/proxy?url=\${encodeURIComponent(t1)}`;
   try {
     const r = await axios.get(selfProxy, { timeout: 12000, headers: { "User-Agent": UA } });
     let d = r.data;
@@ -163,7 +163,7 @@ async function tpbSearch(q, cat) {
 // ── Nyaa RSS ──────────────────────────────────────────────────
 async function nyaaSearch(q) {
   try {
-    const url = `https://nyaa.si/?page=rss&q=${encodeURIComponent(q || "anime")}&c=1_2&f=0`;
+    const url = `https://nyaa.si/?page=rss&q=\${encodeURIComponent(q || "anime")}&c=1_2&f=0`;
     const r = await axios.get(url, { timeout: 10000, headers: { "User-Agent": "Mozilla/5.0" } });
     const items = [];
     for (const block of r.data.split("<item>").slice(1)) {
@@ -178,10 +178,10 @@ async function nyaaSearch(q) {
   } catch(e) { return []; }
 }
 
-// ── Nyaa Sukebei RSS (hentai anime) ──────────────────────────
+// ── Nyaa Sukebei RSS ──────────────────────────────────────────
 async function nyaaSukebeSearch(q) {
   try {
-    const url = `https://sukebei.nyaa.si/?page=rss&q=${encodeURIComponent(q || "hentai")}&c=2_2&f=0`;
+    const url = `https://sukebei.nyaa.si/?page=rss&q=\${encodeURIComponent(q || "hentai")}&c=2_2&f=0`;
     const r = await axios.get(url, { timeout: 10000, headers: { "User-Agent": "Mozilla/5.0" } });
     const items = [];
     for (const block of r.data.split("<item>").slice(1)) {
@@ -196,7 +196,7 @@ async function nyaaSukebeSearch(q) {
   } catch(e) { return []; }
 }
 
-// ── Build streams from TPB results ───────────────────────────
+// ── Build streams ─────────────────────────────────────────────
 function buildStreams(results, refHash) {
   const seen = new Set(refHash ? [refHash] : []);
   const packs = [], singles = [];
@@ -217,11 +217,9 @@ function buildStreams(results, refHash) {
     const epNum = epMatch?.[2] ? parseInt(epMatch[2]) - 1 : 0;
     const shortFile = t.name.length > 60 ? t.name.slice(0, 57) + "..." : t.name;
     const stream = {
-      name: `MultiStream\n${q}`,
-      title: `${shortFile}\n👤 ${sd} 💾 ${sz}`,
-      infoHash: h,
-      fileIdx: epNum,
-      sources: TRACKERS,
+      name: `MultiStream\n\${q}`,
+      title: `\${shortFile}\n👤 \${sd} 💾 \${sz}`,
+      infoHash: h, fileIdx: epNum, sources: TRACKERS,
       behaviorHints: { notWebReady: false }
     };
     if (isSeasonPack) packs.push(stream);
@@ -239,51 +237,39 @@ module.exports = async (req, res) => {
 
   const path = (req.url || "/").split("?")[0];
 
-  // ── STREAM-PROXY — pipes any video URL with CORS + Range support for Video.js ──
+  // ── /stream-proxy ─────────────────────────────────────────────
   if (path === "/stream-proxy") {
     const rawUrl = req.url || "";
     const urlIdx = rawUrl.indexOf("?url=");
     const rawTarget = urlIdx >= 0 ? rawUrl.slice(urlIdx + 5) : "";
     let targetUrl = "";
     try { targetUrl = decodeURIComponent(rawTarget); } catch(e) { targetUrl = rawTarget; }
-
     if (!targetUrl.startsWith("https://") && !targetUrl.startsWith("http://")) {
       res.statusCode = 400; res.end(JSON.stringify({ error: "invalid url" })); return;
     }
-
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type");
     res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges, Content-Type");
-
     if (req.method === "OPTIONS") { res.statusCode = 200; res.end(); return; }
-
     try {
       const https = require("https");
       const http  = require("http");
-
       const fetchAndPipe = (url, redirectCount = 0) => {
         if (redirectCount > 5) { res.statusCode = 502; res.end("too many redirects"); return; }
         const mod = url.startsWith("https") ? https : http;
-        const upstreamHeaders = {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-          "Accept": "*/*",
-        };
+        const upstreamHeaders = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Accept": "*/*" };
         if (req.headers["range"]) upstreamHeaders["Range"] = req.headers["range"];
-
         const u = new URL(url);
         const upReq = mod.request({
-          hostname: u.hostname,
-          path: u.pathname + u.search,
-          method: "GET",
-          headers: upstreamHeaders,
-          timeout: 30000,
+          hostname: u.hostname, path: u.pathname + u.search, method: "GET",
+          headers: upstreamHeaders, timeout: 30000,
         }, (upRes) => {
           if (upRes.statusCode >= 300 && upRes.statusCode < 400 && upRes.headers.location) {
             upRes.resume();
             const next = upRes.headers.location.startsWith("http")
               ? upRes.headers.location
-              : `${u.protocol}//${u.host}${upRes.headers.location}`;
+              : `\${u.protocol}//\${u.host}\${upRes.headers.location}`;
             return fetchAndPipe(next, redirectCount + 1);
           }
           const fwd = ["content-type","content-length","content-range","accept-ranges","last-modified","etag"];
@@ -292,21 +278,16 @@ module.exports = async (req, res) => {
           upRes.pipe(res);
           upRes.on("error", () => { try { res.end(); } catch(e) {} });
         });
-
         upReq.on("error", (e) => { res.statusCode = 502; res.end("upstream error: " + e.message); });
         upReq.on("timeout", () => { upReq.destroy(); res.statusCode = 504; res.end("timeout"); });
         upReq.end();
       };
-
       fetchAndPipe(targetUrl);
-    } catch(e) {
-      res.statusCode = 500;
-      res.end(JSON.stringify({ error: e.message }));
-    }
+    } catch(e) { res.statusCode = 500; res.end(JSON.stringify({ error: e.message })); }
     return;
   }
 
-  // ── SELF-PROXY ──
+  // ── /proxy ────────────────────────────────────────────────────
   if (path === "/proxy") {
     const rawUrl = req.url || "";
     const urlIdx = rawUrl.indexOf("?url=");
@@ -331,13 +312,9 @@ module.exports = async (req, res) => {
         const u = new URL(url);
         const r = https.request({
           hostname: u.hostname, path: u.pathname + u.search, method: "GET",
-          headers: {
-            "User-Agent": ua,
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Cache-Control": "no-cache",
-            "Referer": "https://www.google.com/",
-          },
+          headers: { "User-Agent": ua, "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9", "Cache-Control": "no-cache",
+            "Referer": "https://www.google.com/" },
           timeout: 12000
         }, (resp) => {
           if (resp.statusCode >= 300 && resp.statusCode < 400 && resp.headers.location) {
@@ -349,7 +326,6 @@ module.exports = async (req, res) => {
         r.on("timeout", () => { r.destroy(); reject(new Error("timeout")); });
         r.end();
       });
-
       let data = "[]";
       if (decoded.includes("apibay.org/q.php")) {
         const u = new URL(decoded);
@@ -357,7 +333,7 @@ module.exports = async (req, res) => {
         const cat = u.searchParams.get("cat") || "0";
         const [r1, r2] = await Promise.allSettled([
           fetchUrl(decoded),
-          cat !== "0" ? fetchUrl(`https://apibay.org/q.php?q=${encodeURIComponent(q)}&cat=0`) : Promise.resolve("[]")
+          cat !== "0" ? fetchUrl(`https://apibay.org/q.php?q=\${encodeURIComponent(q)}&cat=0`) : Promise.resolve("[]")
         ]);
         let arr1 = [], arr2 = [];
         try { arr1 = JSON.parse(r1.status === "fulfilled" ? r1.value : "[]"); } catch(e) {}
@@ -374,7 +350,6 @@ module.exports = async (req, res) => {
       } else {
         data = await fetchUrl(decoded);
       }
-
       res.setHeader("Content-Type", "application/json");
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.end(data);
@@ -382,211 +357,153 @@ module.exports = async (req, res) => {
     return;
   }
 
-  // MANIFEST
+  // ── Manifest ──────────────────────────────────────────────────
   if (path === "/" || path === "/manifest.json") return respond(res, manifest);
 
-  // CATALOG
+  // ── Catalog ───────────────────────────────────────────────────
   const cm = path.match(/^\/catalog\/([^/]+)\/([^/]+?)(?:\/([^/]+?))?\.json$/);
   if (cm) {
     const [, type, id, extraStr] = cm;
     const extra = parseExtra(extraStr);
     const search = extra.search || "";
     try {
-      // Hentai via Sukebei Nyaa
       if (id === "ms_hentai") {
         const items = await nyaaSukebeSearch(search || "hentai 1080p");
-        const seen = new Set();
-        const metas = [];
+        const seen = new Set(); const metas = [];
         for (const item of items) {
           const name = clean(item.title.replace(/^\[.*?\]\s*/, ""));
           if (!name || seen.has(name.toLowerCase())) continue;
           seen.add(name.toLowerCase());
-          const encodedName = encodeURIComponent(name).replace(/%/g, "_");
-          metas.push({
-            id: `ms_${item.hash}_${encodedName}`,
-            type: "series", name,
-            poster: `https://via.placeholder.com/300x450/1a0a0a/f97316?text=${encodeURIComponent(name.slice(0,15))}`,
-            description: `🔞 ${quality(item.title)} | 🌱 ${item.seeders} seeds | ${item.size}`,
-            genres: ["Hentai", "Adult", "Anime"]
-          });
+          const enc = encodeURIComponent(name).replace(/%/g, "_");
+          metas.push({ id: `ms_\${item.hash}_\${enc}`, type: "series", name,
+            poster: `https://via.placeholder.com/300x450/1a0a0a/f97316?text=\${encodeURIComponent(name.slice(0,15))}`,
+            description: `🔞 \${quality(item.title)} | 🌱 \${item.seeders} seeds | \${item.size}`,
+            genres: ["Hentai","Adult","Anime"] });
         }
         return respond(res, { metas });
       }
-
-      // Uncensored/Adult via TPB cat 500 (Adult Movies)
       if (id === "ms_xxx") {
         const q = search || "xxx 1080p";
         const results = await tpbSearch(q, "500");
-        const seen = new Set();
-        const metas = [];
+        const seen = new Set(); const metas = [];
         for (const t of results) {
           if (!t.info_hash || parseInt(t.seeders) < 1) continue;
           const name = clean(t.name);
           if (!name || seen.has(name.toLowerCase())) continue;
           seen.add(name.toLowerCase());
-          const encodedName = encodeURIComponent(name).replace(/%/g, "_");
-          metas.push({
-            id: `ms_${t.info_hash.toLowerCase()}_${encodedName}`,
-            type: "movie", name,
-            poster: `https://via.placeholder.com/300x450/1a0a0a/f97316?text=${encodeURIComponent(name.slice(0,15))}`,
-            description: `🔞 ${quality(t.name)} | 🌱 ${t.seeders} seeds | 💾 ${sizeStr(t.size)}`,
-            genres: ["Adult"]
-          });
+          const enc = encodeURIComponent(name).replace(/%/g, "_");
+          metas.push({ id: `ms_\${t.info_hash.toLowerCase()}_\${enc}`, type: "movie", name,
+            poster: `https://via.placeholder.com/300x450/1a0a0a/f97316?text=\${encodeURIComponent(name.slice(0,15))}`,
+            description: `🔞 \${quality(t.name)} | 🌱 \${t.seeders} seeds | 💾 \${sizeStr(t.size)}`,
+            genres: ["Adult"] });
           if (metas.length >= 20) break;
         }
         return respond(res, { metas });
       }
-
       if (id === "ms_anime") {
         const items = await nyaaSearch(search || "anime 1080p");
-        const seen = new Set();
-        const metas = [];
+        const seen = new Set(); const metas = [];
         for (const item of items) {
           const name = clean(item.title.replace(/^\[.*?\]\s*/, ""));
           if (!name || seen.has(name.toLowerCase())) continue;
           seen.add(name.toLowerCase());
-          const encodedName = encodeURIComponent(name).replace(/%/g, "_");
-          metas.push({
-            id: `ms_${item.hash}_${encodedName}`,
-            type: "series", name,
-            poster: `https://via.placeholder.com/300x450/0f0f1a/e879f9?text=${encodeURIComponent(name.slice(0,15))}`,
-            description: `🎌 ${quality(item.title)} | 🌱 ${item.seeders} seeds | ${item.size}`,
-            genres: ["Anime"]
-          });
+          const enc = encodeURIComponent(name).replace(/%/g, "_");
+          metas.push({ id: `ms_\${item.hash}_\${enc}`, type: "series", name,
+            poster: `https://via.placeholder.com/300x450/0f0f1a/e879f9?text=\${encodeURIComponent(name.slice(0,15))}`,
+            description: `🎌 \${quality(item.title)} | 🌱 \${item.seeders} seeds | \${item.size}`,
+            genres: ["Anime"] });
         }
         return respond(res, { metas });
       }
-
       const catMap   = { ms_hollywood: "207", ms_bollywood: "200", ms_tvshows: "205", ms_xxx: "500", ms_hentai: "302" };
       const queryMap = { ms_hollywood: "movie", ms_bollywood: "hindi", ms_tvshows: "tv show", ms_xxx: "xxx", ms_hentai: "hentai" };
       const q   = search || queryMap[id] || "movie";
       const cat = catMap[id] || "0";
       const results = await tpbSearch(q, cat);
-      const seen = new Set();
-      const metas = [];
+      const seen = new Set(); const metas = [];
       for (const t of results) {
         if (!t.info_hash || parseInt(t.seeders) < 1) continue;
         const name = clean(t.name);
         if (!name || seen.has(name.toLowerCase())) continue;
         seen.add(name.toLowerCase());
-        let metaId = `ms_${t.info_hash.toLowerCase()}_${encodeURIComponent(name).replace(/%/g,"_")}`;
-        let poster = `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent(name.slice(0,15))}`;
-        let desc = `${quality(t.name)} | 🌱 ${t.seeders} seeds | 💾 ${sizeStr(t.size)}`;
-        let yr = (t.name.match(/\b(19|20)\d{2}\b/) || [])[0] || "";
-        metas.push({ id: metaId, type, name, poster, description: desc, year: yr, genres: [] });
+        metas.push({
+          id: `ms_\${t.info_hash.toLowerCase()}_\${encodeURIComponent(name).replace(/%/g,"_")}`,
+          type, name,
+          poster: `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=\${encodeURIComponent(name.slice(0,15))}`,
+          description: `\${quality(t.name)} | 🌱 \${t.seeders} seeds | 💾 \${sizeStr(t.size)}`,
+          year: (t.name.match(/\b(19|20)\d{2}\b/) || [])[0] || "", genres: []
+        });
         if (metas.length >= 20) break;
       }
       return respond(res, { metas });
-    } catch(e) {
-      return respond(res, { metas: [] });
-    }
+    } catch(e) { return respond(res, { metas: [] }); }
   }
 
-  // META
+  // ── Meta ──────────────────────────────────────────────────────
   const mm = path.match(/^\/meta\/([^/]+)\/([^/]+?)\.json$/);
   if (mm) {
     const [, type, id] = mm;
-    // ms_ ids: never touch TMDB, serve local meta only
     if (id.startsWith("ms_")) {
       const parts = id.replace("ms_", "").split("_");
       const name = parts.length > 1
         ? decodeURIComponent(parts.slice(1).join("_").replace(/_/g, "%"))
         : parts[0].slice(0, 12);
-      return respond(res, { meta: {
-        id, type, name,
-        poster: `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent(name.slice(0,15))}`,
-        description: name, genres: []
-      }});
+      return respond(res, { meta: { id, type, name,
+        poster: `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=\${encodeURIComponent(name.slice(0,15))}`,
+        description: name, genres: [] }});
     }
-    // tt ids: TMDB lookup
     if (id.startsWith("tt")) {
       const info = await tmdbFindByImdb(id);
       if (info) {
-        return respond(res, { meta: {
-          id, type, name: info.name,
-          poster: info.poster || `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=${encodeURIComponent(info.name.slice(0,15))}`,
-          background: info.bg || info.poster,
-          description: info.description, year: info.year, genres: []
-        }});
+        return respond(res, { meta: { id, type, name: info.name,
+          poster: info.poster || `https://via.placeholder.com/300x450/0f0f1a/818cf8?text=\${encodeURIComponent(info.name.slice(0,15))}`,
+          background: info.bg || info.poster, description: info.description, year: info.year, genres: [] }});
       }
     }
     return respond(res, { meta: { id, type, name: id, genres: [] } });
   }
 
-  // STREAM
+  // ── Stream ────────────────────────────────────────────────────
   const sm = path.match(/^\/stream\/([^/]+)\/([^/]+?)\.json$/);
   if (sm) {
     const [, type, rawId] = sm;
     const decoded = decodeURIComponent(rawId);
     const ttMatch = decoded.match(/^(tt\d+)(?::(\d+):(\d+))?$/);
     const isMsId  = decoded.startsWith("ms_");
-
-    let titleQuery = "";
-    let season = null, episode = null;
-    let refHash = "";
-
+    let titleQuery = "", season = null, episode = null, refHash = "";
     if (ttMatch) {
       const imdbId = ttMatch[1];
       season  = ttMatch[2] ? parseInt(ttMatch[2]) : null;
       episode = ttMatch[3] ? parseInt(ttMatch[3]) : null;
-      try {
-        const info = await tmdbFindByImdb(imdbId);
-        titleQuery = info?.name || "";
-      } catch(e) {}
+      try { const info = await tmdbFindByImdb(imdbId); titleQuery = info?.name || ""; } catch(e) {}
     } else if (isMsId) {
       const parts = decoded.replace("ms_", "").split("_");
       refHash = parts[0];
-      titleQuery = parts.length > 1
-        ? decodeURIComponent(parts.slice(1).join("_").replace(/_/g, "%"))
-        : "";
+      titleQuery = parts.length > 1 ? decodeURIComponent(parts.slice(1).join("_").replace(/_/g, "%")) : "";
     }
-
-    // For adult content: serve the stream directly from the hash, no re-search needed
-    const isAdult = decoded.startsWith("ms_") && (() => {
-      // We can't know the catalog here, but if refHash is set and titleQuery looks adult, skip TMDB
-      return true; // ms_ ids never go through TMDB anyway in stream handler
-    })();
-
     if (!titleQuery || refHash) {
-      // ms_ id: just serve the stored hash directly — no re-search
       if (refHash) {
-        return respond(res, { streams: [{
-          name: "MultiStream", title: titleQuery || "⚡ Play",
-          infoHash: refHash,
-          fileIdx: 0,
-          sources: TRACKERS, behaviorHints: { notWebReady: false }
-        }]});
+        return respond(res, { streams: [{ name: "MultiStream", title: titleQuery || "⚡ Play",
+          infoHash: refHash, fileIdx: 0, sources: TRACKERS, behaviorHints: { notWebReady: false } }]});
       }
-      return respond(res, { streams: [{
-        name: "MultiStream", title: "⚡ Play",
-        infoHash: decoded.replace("ms_","").split("_")[0],
-        sources: TRACKERS, behaviorHints: { notWebReady: false }
-      }]});
+      return respond(res, { streams: [{ name: "MultiStream", title: "⚡ Play",
+        infoHash: decoded.replace("ms_","").split("_")[0], sources: TRACKERS, behaviorHints: { notWebReady: false } }]});
     }
-
-    // IMDB id path — search TPB for matching torrents
     const cat = type === "movie" ? "207" : "205";
     let results = [];
-
     if (season !== null && episode !== null) {
-      const epQ     = `${titleQuery} S${String(season).padStart(2,"0")}E${String(episode).padStart(2,"0")}`;
-      const seasonQ = `${titleQuery} S${String(season).padStart(2,"0")}`;
-      const [r1, r2] = await Promise.allSettled([
-        tpbSearch(epQ, cat),
-        tpbSearch(seasonQ, cat),
-      ]);
-      const seen = new Set();
-      const merged = [];
+      const epQ     = `\${titleQuery} S\${String(season).padStart(2,"0")}E\${String(episode).padStart(2,"0")}`;
+      const seasonQ = `\${titleQuery} S\${String(season).padStart(2,"0")}`;
+      const [r1, r2] = await Promise.allSettled([tpbSearch(epQ, cat), tpbSearch(seasonQ, cat)]);
+      const seen = new Set(); const merged = [];
       for (const r of [r1, r2]) {
         if (r.status !== "fulfilled") continue;
         for (const t of r.value) {
           if (!t.info_hash || seen.has(t.info_hash.toLowerCase())) continue;
           const titleWords = titleQuery.toLowerCase().split(" ").filter(w => w.length > 2);
-          const tname = t.name.toLowerCase();
-          const matchCount = titleWords.filter(w => tname.includes(w)).length;
+          const matchCount = titleWords.filter(w => t.name.toLowerCase().includes(w)).length;
           if (matchCount < Math.ceil(titleWords.length * 0.6)) continue;
-          seen.add(t.info_hash.toLowerCase());
-          merged.push(t);
+          seen.add(t.info_hash.toLowerCase()); merged.push(t);
         }
       }
       results = merged;
@@ -594,78 +511,62 @@ module.exports = async (req, res) => {
       results = await tpbSearch(titleQuery, cat).catch(() => []);
     }
     const streams = buildStreams(results, refHash);
-
     if (!streams.length) {
-      return respond(res, { streams: [{
-        name: "MultiStream", title: `${titleQuery}\n⚡ Play`,
+      return respond(res, { streams: [{ name: "MultiStream", title: `\${titleQuery}\n⚡ Play`,
         infoHash: refHash || "0000000000000000000000000000000000000000",
-        sources: TRACKERS, behaviorHints: { notWebReady: false }
-      }]});
+        sources: TRACKERS, behaviorHints: { notWebReady: false } }]});
     }
     return respond(res, { streams });
   }
 
-
-  // ── EPORNER SEARCH ──────────────────────────────────────────────
-  // GET /eporner?q=QUERY&n=20
-  // Fetches Eporner official API server-side and returns clean JSON.
-  // Used by cinevault.html to show adult search results.
+  // ── /eporner ──────────────────────────────────────────────────
   if (path === "/eporner") {
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
     res.setHeader("Content-Type", "application/json");
     const qs = new URL(req.url, "http://localhost").searchParams;
     const q = qs.get("q") || "";
     const n = Math.min(parseInt(qs.get("n") || "20"), 50);
     if (!q) { res.end(JSON.stringify({ videos: [] })); return; }
     try {
-      const epUrl =
-        "https://www.eporner.com/api/v2/video/search/" +
-        "?query=" + encodeURIComponent(q) +
-        "&per_page=" + n +
-        "&thumbsize=big&format=json&lp=en&order=top-rated";
-      const r = await axios.get(epUrl, {
-        headers: { "User-Agent": "Mozilla/5.0", "Accept": "*/*" },
-        timeout: 12000,
-      });
+      const epUrl = "https://www.eporner.com/api/v2/video/search/?query=" + encodeURIComponent(q) +
+        "&per_page=" + n + "&thumbsize=big&format=json&lp=en&order=top-rated";
+      const r = await axios.get(epUrl, { headers: { "User-Agent": "Mozilla/5.0", "Accept": "*/*" }, timeout: 12000 });
       const videos = (r.data?.videos || []).map((v) => {
-        // videoSources: pick best quality MP4 direct link
         const sources = v.videoSources || {};
-        const qualOrder = ["1080p","720p","480p","360p","240p"];
         let mp4 = null;
-        for (const q of qualOrder) {
-          if (sources[q]) { mp4 = sources[q]; break; }
-        }
-        // fallback: any source
+        for (const q of ["1080p","720p","480p","360p","240p"]) { if (sources[q]) { mp4 = sources[q]; break; } }
         if (!mp4) mp4 = Object.values(sources)[0] || null;
-        return {
-          id:       v.id,
-          title:    v.title || v.id,
-          embed:    v.embed,
-          mp4:      mp4,
-          thumb:    v.thumbs?.[2]?.src || v.thumbs?.[0]?.src || v.default_thumb?.src || null,
+        return { id: v.id, title: v.title || v.id, embed: v.embed, mp4,
+          thumb: v.thumbs?.[2]?.src || v.thumbs?.[0]?.src || v.default_thumb?.src || null,
           duration: v.length_min ? v.length_min + " min" : null,
-          views:    v.views  || 0,
-          rating:   v.rate   || null,
-          added:    v.added  || null,
-        };
+          views: v.views || 0, rating: v.rate || null, added: v.added || null };
       });
       res.end(JSON.stringify({ videos }));
-    } catch (e) {
-      res.statusCode = 502;
-      res.end(JSON.stringify({ videos: [], error: String(e.message) }));
-    }
+    } catch(e) { res.statusCode = 502; res.end(JSON.stringify({ videos: [], error: String(e.message) })); }
     return;
   }
 
-
-  // ── EMBED PROXY — fetches 2embed HTML and injects CSS to hide share button ──
+  // ── /embed-proxy ──────────────────────────────────────────────
+  // Proxies embed pages for all supported providers.
+  // Injects: ad-killing CSS + JS blocker so ads/popups are stripped server-side.
   if (path === "/embed-proxy") {
     const qs = new URL(req.url, "http://localhost").searchParams;
     const target = qs.get("url") || "";
-    if (!target.startsWith("https://www.2embed.cc/")) {
+    const EMBED_WHITELIST = [
+      "https://www.2embed.cc/",
+      "https://www.2embed.stream/",
+      "https://vidsrc.icu/",
+      "https://vidsrc.me/",
+      "https://vidsrc.rip/",
+      "https://vidlink.pro/",
+      "https://www.nontongo.win/",
+      "https://multiembed.mov/",
+    ];
+    if (!EMBED_WHITELIST.some(w => target.startsWith(w))) {
       res.statusCode = 403; res.end("forbidden"); return;
     }
+    let targetOrigin = "https://www.2embed.cc/";
+    try { targetOrigin = new URL(target).origin + "/"; } catch(e) {}
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("X-Frame-Options", "ALLOWALL");
@@ -673,49 +574,72 @@ module.exports = async (req, res) => {
     try {
       const r = await axios.get(target, {
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          "Referer": "https://www.2embed.cc/",
-          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+          "Referer": targetOrigin,
+          "Accept": "text/html,*/*",
           "Accept-Language": "en-US,en;q=0.9",
         },
-        timeout: 15000,
-        maxRedirects: 5,
+        timeout: 15000, maxRedirects: 5,
       });
       let html = r.data || "";
-      // Set base href so all relative URLs resolve correctly to 2embed
-      const baseTag = '<base href="https://www.2embed.cc/">';
-      // Inject base tag + share blocker CSS right after <head>
-      const inject = baseTag + `<style>
-        .jw-icon-sharing,.jw-sharing-skin,.jw-controlbar .jw-icon-sharing,
-        [class*="share"],[class*="Share"],[id*="share"],[id*="Share"],
-        [class*="social"],[id*="social"],[data-sharing],
-        a[href*="facebook.com/sharer"],a[href*="twitter.com/intent"],
-        a[href*="whatsapp"],a[href*="t.me/share"],
-        .sharing-overlay,.share-overlay,.share-box {
+
+      // Ad-kill CSS: nukes known ad/overlay/popup patterns
+      const adCSS = `<style>
+        [class*="popup"],[class*="Popup"],[id*="popup"],[id*="Popup"],
+        [class*="overlay-ad"],[class*="ad-overlay"],[class*="advert"],
+        [class*="banner-ad"],[id*="advert"],[class*="ad-"],[id*="ad-"],
+        [class*="-ad"],[class*="vast"],[id*="vast"],
+        [class*="preroll"],[id*="preroll"],
+        iframe[src*="ads"],iframe[src*="doubleclick"],
+        iframe[src*="googlesyndication"],iframe[src*="exoclick"],
+        div[style*="z-index: 9999"],div[style*="z-index:9999"],
+        a[href*="exe.io"],a[href*="adf.ly"],a[href*="ouo.io"],
+        .adsbygoogle,.ad-label,.ad-container,.ad-slot,.ad-unit,
+        #carbonads,[id^="google_ads"],
+        [class*="share"],[id*="share"],[class*="Share"],[id*="Share"],
+        [class*="social"],[data-sharing],.sharing-overlay,.share-box,
+        [class*="countdown"],[id*="countdown"],
+        [class*="skip-ad"],[id*="skip-ad"] {
           display:none!important;visibility:hidden!important;
-          opacity:0!important;pointer-events:none!important;
-          width:0!important;height:0!important;max-width:0!important;max-height:0!important;
+          pointer-events:none!important;opacity:0!important;
         }
       </style>`;
-      if (html.includes("<head>")) {
-        html = html.replace("<head>", "<head>" + inject);
-      } else if (html.includes("<head ")) {
-        html = html.replace(/<head[^>]*>/, m => m + inject);
-      } else {
-        html = inject + html;
-      }
-      // MutationObserver script before </body>
-      const nukeJS = `<script>(function(){
-        var sel = '.jw-icon-sharing,.jw-sharing-skin,[class*="share"],[id*="share"],[class*="Share"],[id*="Share"],[class*="social"],[id*="social"],[data-sharing],a[href*="facebook.com/sharer"],a[href*="twitter.com/intent"]';
-        function nuke(){document.querySelectorAll(sel).forEach(function(el){if(el.tagName!=="VIDEO"&&el.tagName!=="SOURCE"&&el.tagName!=="BODY"&&el.tagName!=="HTML"){el.style.setProperty("display","none","important");el.style.setProperty("visibility","hidden","important");}});}
-        nuke();setInterval(nuke,300);
-        new MutationObserver(nuke).observe(document.documentElement,{childList:true,subtree:true});
-      })();<\/script>`;
-      if (html.includes("</body>")) {
-        html = html.replace("</body>", nukeJS + "</body>");
-      } else {
-        html += nukeJS;
-      }
+
+      // Ad-kill JS: blocks window.open, alert, redirects, and dynamic ad injection
+      const adJS = `<script>
+        window.open = () => null;
+        window.alert = () => null;
+        window.confirm = () => true;
+        const __sto = window.setTimeout;
+        window.setTimeout = (fn, d, ...a) => {
+          if (typeof fn === "string" &&
+              (fn.includes("location") || fn.includes("window.open"))) return 0;
+          return __sto(fn, d, ...a);
+        };
+        const __obs = new MutationObserver(muts => {
+          muts.forEach(m => m.addedNodes.forEach(n => {
+            if (!n.tagName) return;
+            const src = (n.src || n.href || "").toLowerCase();
+            const cls = (n.className || "").toLowerCase();
+            const nid = (n.id || "").toLowerCase();
+            if (n.tagName === "IFRAME" &&
+                /ads|doubleclick|googlesyndication|exoclick|trafficjunky|adsterra/.test(src))
+              n.remove();
+            if (cls.includes("popup") || nid.includes("popup") ||
+                cls.includes("advert") || nid.includes("advert"))
+              n.remove();
+          }));
+        });
+        document.addEventListener("DOMContentLoaded", () => {
+          __obs.observe(document.body, { childList: true, subtree: true });
+        });
+      <\/script>`;
+
+      const inject = `<base href="${targetOrigin}">` + adCSS + adJS;
+      if (html.includes("<head>"))       html = html.replace("<head>",  "<head>"  + inject);
+      else if (html.includes("<html>"))  html = html.replace("<html>",  "<html>"  + inject);
+      else                               html = inject + html;
+
       res.end(html);
     } catch(e) {
       res.statusCode = 502;
@@ -724,62 +648,42 @@ module.exports = async (req, res) => {
     return;
   }
 
-
-  // ── SEAPI — fetches direct HLS/MP4 streams from superembed seapi.link ──
+  // ── /seapi ────────────────────────────────────────────────────
   if (path === "/seapi") {
     const qs = new URL(req.url, "http://localhost").searchParams;
-    const tmdbId = qs.get("tmdb") || "";
-    const imdbId = qs.get("imdb") || "";
-    const season = qs.get("s") || "";
-    const episode = qs.get("e") || "";
+    const tmdbId = qs.get("tmdb") || "", imdbId = qs.get("imdb") || "";
+    const season = qs.get("s") || "", episode = qs.get("e") || "";
     if (!tmdbId && !imdbId) { res.statusCode = 400; res.end(JSON.stringify({error:"id required"})); return; }
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Content-Type", "application/json");
     try {
-      let apiUrl;
-      if (tmdbId) {
-        apiUrl = season
-          ? `https://seapi.link/?type=tmdb&id=${tmdbId}&season=${season}&episode=${episode}&max_results=3`
-          : `https://seapi.link/?type=tmdb&id=${tmdbId}&max_results=3`;
-      } else {
-        apiUrl = season
-          ? `https://seapi.link/?type=imdb&id=${imdbId}&season=${season}&episode=${episode}&max_results=3`
-          : `https://seapi.link/?type=imdb&id=${imdbId}&max_results=3`;
-      }
+      const base = tmdbId ? `https://seapi.link/?type=tmdb&id=\${tmdbId}` : `https://seapi.link/?type=imdb&id=\${imdbId}`;
+      const apiUrl = season ? base + `&season=\${season}&episode=\${episode}&max_results=3` : base + "&max_results=3";
       const r = await axios.get(apiUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-          "Referer": "https://multiembed.mov/",
-          "Origin": "https://multiembed.mov",
-        },
+        headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://multiembed.mov/", "Origin": "https://multiembed.mov" },
         timeout: 15000,
       });
       res.end(JSON.stringify(r.data));
-    } catch(e) {
-      res.statusCode = 502;
-      res.end(JSON.stringify({error: e.message}));
-    }
+    } catch(e) { res.statusCode = 502; res.end(JSON.stringify({error: e.message})); }
     return;
   }
 
-  // ── VIDSRC STREAM EXTRACTOR ─────────────────────────────────────
-  // GET /vidsrc?tmdb=TMDBID&type=movie
-  // GET /vidsrc?tmdb=TMDBID&type=tv&s=1&e=1
+  // ── /vidsrc — extract real m3u8 from vidsrc.net ───────────────
+  // GET /vidsrc?tmdb=ID&type=movie
+  // GET /vidsrc?tmdb=ID&type=tv&s=1&e=1
   // Returns: { streams: [{ url, quality, provider, referer }] }
-  // Pure fetch/axios — no Puppeteer. Works within Vercel 10s timeout.
   if (path === "/vidsrc") {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Content-Type", "application/json");
     const qs = new URL(req.url, "http://localhost").searchParams;
     const tmdbId = qs.get("tmdb") || "";
-    const type   = qs.get("type") || "movie";  // "movie" or "tv"
+    const type   = qs.get("type") || "movie";
     const season  = qs.get("s") || "";
     const episode = qs.get("e") || "";
     if (!tmdbId) { res.statusCode = 400; res.end(JSON.stringify({ error: "tmdb required" })); return; }
 
     const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36";
 
-    // RC4 decrypt — vidsrc uses RC4 for stream URL encryption
     function rc4Decrypt(key, data) {
       const keyBytes = Buffer.from(key, "utf8");
       const dataBytes = Buffer.from(data, "base64");
@@ -800,57 +704,38 @@ module.exports = async (req, res) => {
       return Buffer.from(out).toString("utf8");
     }
 
-    // VRF encode for vidsrc.me (used for sub-ids)
-    function vrfEncode(id) {
-      const key = "8z5Ag5wgagfsOuhz";
-      return Buffer.from(rc4Decrypt(key, Buffer.from(id).toString("base64"))).toString("base64")
-        .replace(/\//g, "_").replace(/\+/g, "-").replace(/=/g, "");
-    }
-
     try {
-      // Step 1: Build embed URL for vidsrc.net
       let embedUrl;
       if (type === "tv") {
         if (!season || !episode) { res.statusCode = 400; res.end(JSON.stringify({ error: "s and e required for tv" })); return; }
-        embedUrl = `https://vidsrc.net/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`;
+        embedUrl = `https://vidsrc.net/embed/tv?tmdb=\${tmdbId}&season=\${season}&episode=\${episode}`;
       } else {
-        embedUrl = `https://vidsrc.net/embed/movie?tmdb=${tmdbId}`;
+        embedUrl = `https://vidsrc.net/embed/movie?tmdb=\${tmdbId}`;
       }
 
-      // Step 2: Fetch embed page
       const embedRes = await axios.get(embedUrl, {
         headers: { "User-Agent": UA, "Referer": "https://vidsrc.net/" },
-        timeout: 8000,
-        maxRedirects: 5,
+        timeout: 8000, maxRedirects: 5,
       });
       const embedHtml = typeof embedRes.data === "string" ? embedRes.data : JSON.stringify(embedRes.data);
 
-      // Extract base domain from iframe src
-      const iframeSrcMatch = embedHtml.match(/src="(https?:\/\/[^"]+\/embed\/[^"]+)"/);
       const baseDomMatch = embedHtml.match(/https?:\/\/([^/]+)\/embed\//);
-      const BASEDOM = baseDomMatch ? `https://${baseDomMatch[1]}` : "https://vidsrc.net";
+      const BASEDOM = baseDomMatch ? `https://\${baseDomMatch[1]}` : "https://vidsrc.net";
 
-      // Step 3: Parse server list — look for .serversList .server elements
-      // In HTML: <div data-hash="HASH" class="server" data-id="SERVER_ID">NAME</div>
       const serverRegex = /data-hash="([^"]+)"[^>]*(?:data-id="([^"]+)")?[^>]*>([^<]*)</g;
       const servers = [];
       let match;
       while ((match = serverRegex.exec(embedHtml)) !== null) {
-        if (match[1] && match[1].length > 5) {
+        if (match[1] && match[1].length > 5)
           servers.push({ dataHash: match[1], serverId: match[2] || "", name: match[3].trim() });
-        }
       }
-
-      // Also try alternate pattern
       const altRegex = /class="server[^"]*"[^>]*data-hash="([^"]+)"/g;
       while ((match = altRegex.exec(embedHtml)) !== null) {
-        if (match[1] && !servers.find(s => s.dataHash === match[1])) {
+        if (match[1] && !servers.find(s => s.dataHash === match[1]))
           servers.push({ dataHash: match[1], serverId: "", name: "Server" });
-        }
       }
 
       if (servers.length === 0) {
-        // Fallback: try to extract any m3u8 directly from the embed HTML
         const m3u8Match = embedHtml.match(/https?:\/\/[^"'\s]+\.m3u8[^"'\s]*/);
         if (m3u8Match) {
           res.end(JSON.stringify({ streams: [{ url: m3u8Match[0], quality: "auto", provider: "vidsrc.net", referer: BASEDOM }] }));
@@ -860,77 +745,47 @@ module.exports = async (req, res) => {
         return;
       }
 
-      // Step 4: Fetch RCP data for each server and decrypt
       const streams = [];
       const rcpResults = await Promise.allSettled(
         servers.slice(0, 3).map(async (srv) => {
           try {
-            const rcpUrl = `${BASEDOM}/rcp/${srv.dataHash}`;
+            const rcpUrl = `\${BASEDOM}/rcp/\${srv.dataHash}`;
             const rcpRes = await axios.get(rcpUrl, {
-              headers: {
-                "User-Agent": UA,
-                "Referer": embedUrl,
-                "X-Requested-With": "XMLHttpRequest",
-              },
+              headers: { "User-Agent": UA, "Referer": embedUrl, "X-Requested-With": "XMLHttpRequest" },
               timeout: 6000,
             });
             const rcpHtml = typeof rcpRes.data === "string" ? rcpRes.data : JSON.stringify(rcpRes.data);
-
-            // Extract src from RCP response: src:'...' or src: "..."
             const srcMatch = rcpHtml.match(/src:\s*['"]([^'"]+)['"]/);
             if (!srcMatch) return null;
             const rcpSrc = srcMatch[1];
-
-            // If src starts with // or https: and contains .m3u8 directly, use it
             if (/\.m3u8/i.test(rcpSrc)) {
               const url = rcpSrc.startsWith("//") ? "https:" + rcpSrc : rcpSrc;
               return { url, quality: "auto", provider: srv.name || "vidsrc", referer: BASEDOM };
             }
-
-            // PRORCPhandler: rcpSrc is a prorcp URL, need to decrypt
             const proUrl = rcpSrc.startsWith("//") ? "https:" + rcpSrc : rcpSrc;
-            const proRes = await axios.get(proUrl, {
-              headers: { "User-Agent": UA, "Referer": BASEDOM + "/" },
-              timeout: 6000,
-            });
+            const proRes = await axios.get(proUrl, { headers: { "User-Agent": UA, "Referer": BASEDOM + "/" }, timeout: 6000 });
             const proHtml = typeof proRes.data === "string" ? proRes.data : JSON.stringify(proRes.data);
-
-            // Find the JS file (not cpt.js)
             const scriptMatches = [...proHtml.matchAll(/src="([^"]+\.js[^"]*)"/g)];
             const jsFile = scriptMatches.map(m => m[1]).find(s => !s.includes("cpt.js"));
             if (!jsFile) return null;
-
             const jsUrl = jsFile.startsWith("http") ? jsFile : (new URL(jsFile, proUrl)).href;
-            const jsRes = await axios.get(jsUrl, {
-              headers: { "User-Agent": UA, "Referer": proUrl },
-              timeout: 5000,
-            });
+            const jsRes = await axios.get(jsUrl, { headers: { "User-Agent": UA, "Referer": proUrl }, timeout: 5000 });
             const jsContent = typeof jsRes.data === "string" ? jsRes.data : JSON.stringify(jsRes.data);
-
-            // Extract decryption key from JS: look for rc4 key pattern
             const keyMatch = jsContent.match(/['"]([a-zA-Z0-9]{8,32})['"]/);
             if (!keyMatch) return null;
-            const decKey = keyMatch[1];
-
-            // Extract encrypted content from prorcp page
             const encMatch = proHtml.match(/data:\s*['"]([A-Za-z0-9+/=]+)['"]/);
             if (!encMatch) return null;
-
-            const decrypted = rc4Decrypt(decKey, encMatch[1]);
+            const decrypted = rc4Decrypt(keyMatch[1], encMatch[1]);
             if (!decrypted.includes(".m3u8") && !decrypted.includes(".mp4")) return null;
-
             const finalUrl = decrypted.startsWith("//") ? "https:" + decrypted : decrypted;
             return { url: finalUrl, quality: "auto", provider: srv.name || "vidsrc", referer: BASEDOM };
-          } catch(e) {
-            return null;
-          }
+          } catch(e) { return null; }
         })
       );
 
       for (const r of rcpResults) {
         if (r.status === "fulfilled" && r.value) streams.push(r.value);
       }
-
       res.end(JSON.stringify({ streams, embedUrl, serversFound: servers.length }));
     } catch(e) {
       res.statusCode = 502;
@@ -939,192 +794,442 @@ module.exports = async (req, res) => {
     return;
   }
 
-  // ── /autoembed — AES-decrypted streams from autoembed servers ─
-  // GET /autoembed?tmdb=ID&type=movie
-  // GET /autoembed?tmdb=ID&type=tv&s=1&e=1
-  // Returns: { streams: [{ url, type, lang }] }
-  // Servers 1-3=English, 4-5=Hindi, 6-7=Bengali, 8-9=Tamil, 10-11=Telugu
-  if (path === "/autoembed") {
+  // ── /direct-stream — exact vidsrc.ts port ────────────────────
+  // GET /direct-stream?tmdb=ID&type=movie|tv&s=1&e=1
+  // Ports https://github.com/cool-dev-guy/vidsrc.ts exactly
+  // Returns: [{ name, image, mediaId, stream, referer }]
+  if (path === "/direct-stream") {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Content-Type", "application/json");
-    const qs = new URL(req.url, "http://localhost").searchParams;
+    const qs      = new URL(req.url, "http://localhost").searchParams;
     const tmdbId  = qs.get("tmdb") || "";
     const type    = qs.get("type") || "movie";
-    const season  = qs.get("s") || "";
-    const episode = qs.get("e") || "";
+    const season  = parseInt(qs.get("s") || "0");
+    const episode = parseInt(qs.get("e") || "0");
     if (!tmdbId) { res.statusCode = 400; res.end(JSON.stringify({ error: "tmdb required" })); return; }
 
-    const crypto = require("crypto");
-    const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.6787.65 Safari/537.36";
-
-    function decryptAutoEmbed(encryptedObjectB64) {
-      const obj = JSON.parse(Buffer.from(encryptedObjectB64, "base64").toString("utf8"));
-      const { algorithm, key, iv, salt, iterations, encryptedData } = obj;
-      const derivedKey = crypto.pbkdf2Sync(key, Buffer.from(salt, "hex"), iterations, 32, "sha256");
-      const decipher = crypto.createDecipheriv(algorithm, derivedKey, Buffer.from(iv, "hex"));
-      const decrypted = decipher.update(encryptedData, "base64", "utf8") + decipher.final("utf8");
-      return JSON.parse(decrypted);
+    // ── Exact port of decoder.ts ───────────────────────────────
+    function bMGyx71TzQLfdonN(s) {
+      const chunks = [];
+      for (let i = 0; i < s.length; i += 3) chunks.push(s.slice(i, i + 3));
+      return chunks.reverse().join("");
+    }
+    function Iry9MQXnLs(s) {
+      const key = "pWB9V)[*4I`nJpp?ozyB~dbr9yt!_n4u";
+      const hex = s.match(/.{1,2}/g).map(h => String.fromCharCode(parseInt(h, 16))).join("");
+      let xored = "";
+      for (let i = 0; i < hex.length; i++)
+        xored += String.fromCharCode(hex.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+      let shifted = "";
+      for (let i = 0; i < xored.length; i++)
+        shifted += String.fromCharCode(xored.charCodeAt(i) - 3);
+      return Buffer.from(shifted, "base64").toString("utf8");
+    }
+    function IGLImMhWrI(s) {
+      const rev = s.split("").reverse().join("");
+      const rot = rev.replace(/[a-zA-Z]/g, c =>
+        String.fromCharCode(c.charCodeAt(0) + (c.toLowerCase() < "n" ? 13 : -13)));
+      const rev2 = rot.split("").reverse().join("");
+      return Buffer.from(rev2, "base64").toString("utf8");
+    }
+    function GTAxQyTyBx(s) {
+      const rev = s.split("").reverse().join("");
+      let evens = "";
+      for (let i = 0; i < rev.length; i += 2) evens += rev[i];
+      return Buffer.from(evens, "base64").toString("utf8");
+    }
+    function C66jPHx8qu(s) {
+      const key = "X9a(O;FMV2-7VO5x;Ao:dN1NoFs?j,";
+      const rev = s.split("").reverse().join("");
+      const hex = rev.match(/.{1,2}/g).map(h => String.fromCharCode(parseInt(h, 16))).join("");
+      let out = "";
+      for (let i = 0; i < hex.length; i++)
+        out += String.fromCharCode(hex.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+      return out;
+    }
+    function MyL1IRSfHe(s) {
+      const rev = s.split("").reverse().join("");
+      let shifted = "";
+      for (let i = 0; i < rev.length; i++)
+        shifted += String.fromCharCode(rev.charCodeAt(i) - 1);
+      let hex = "";
+      for (let i = 0; i < shifted.length; i += 2)
+        hex += String.fromCharCode(parseInt(shifted.substr(i, 2), 16));
+      return hex;
+    }
+    function detdj7JHiK(s) {
+      const key = `3SAY~#%Y(V%>5d/Yg"$G[Lh1rK4a;7ok`;
+      const sliced = s.slice(10, -16);
+      const decoded = Buffer.from(sliced, "base64").toString("binary");
+      const k = key.repeat(Math.ceil(decoded.length / key.length)).substring(0, decoded.length);
+      let out = "";
+      for (let i = 0; i < decoded.length; i++)
+        out += String.fromCharCode(decoded.charCodeAt(i) ^ k.charCodeAt(i));
+      return out;
+    }
+    function laM1dAi3vO(s) {
+      const rev = s.split("").reverse().join("").replace(/-/g, "+").replace(/_/g, "/");
+      const decoded = Buffer.from(rev, "base64").toString("binary");
+      let out = "";
+      for (let i = 0; i < decoded.length; i++)
+        out += String.fromCharCode(decoded.charCodeAt(i) - 5);
+      return out;
+    }
+    function GuxKGDsA2T(s) {
+      const rev = s.split("").reverse().join("").replace(/-/g, "+").replace(/_/g, "/");
+      const decoded = Buffer.from(rev, "base64").toString("binary");
+      let out = "";
+      for (let i = 0; i < decoded.length; i++)
+        out += String.fromCharCode(decoded.charCodeAt(i) - 7);
+      return out;
+    }
+    function LXVUMCoAHJ(s) {
+      const rev = s.split("").reverse().join("").replace(/-/g, "+").replace(/_/g, "/");
+      const decoded = Buffer.from(rev, "base64").toString("binary");
+      let out = "";
+      for (let i = 0; i < decoded.length; i++)
+        out += String.fromCharCode(decoded.charCodeAt(i) - 3);
+      return out;
+    }
+    function nZlUnj2VSo(s) {
+      const map = {x:"a",y:"b",z:"c",a:"d",b:"e",c:"f",d:"g",e:"h",f:"i",g:"j",h:"k",i:"l",j:"m",k:"n",l:"o",m:"p",n:"q",o:"r",p:"s",q:"t",r:"u",s:"v",t:"w",u:"x",v:"y",w:"z",X:"A",Y:"B",Z:"C",A:"D",B:"E",C:"F",D:"G",E:"H",F:"I",G:"J",H:"K",I:"L",J:"M",K:"N",L:"O",M:"P",N:"Q",O:"R",P:"S",Q:"T",R:"U",S:"V",T:"W",U:"X",V:"Y",W:"Z"};
+      return s.replace(/[xyzabcdefghijklmnopqrstuvwXYZABCDEFGHIJKLMNOPQRSTUVW]/g, c => map[c] || c);
+    }
+    function decrypt(param, type) {
+      switch(type) {
+        case "LXVUMCoAHJ": return LXVUMCoAHJ(param);
+        case "GuxKGDsA2T": return GuxKGDsA2T(param);
+        case "laM1dAi3vO": return laM1dAi3vO(param);
+        case "nZlUnj2VSo": return nZlUnj2VSo(param);
+        case "Iry9MQXnLs": return Iry9MQXnLs(param);
+        case "IGLImMhWrI": return IGLImMhWrI(param);
+        case "GTAxQyTyBx": return GTAxQyTyBx(param);
+        case "C66jPHx8qu": return C66jPHx8qu(param);
+        case "MyL1IRSfHe": return MyL1IRSfHe(param);
+        case "detdj7JHiK": return detdj7JHiK(param);
+        case "bMGyx71TzQLfdonN": return bMGyx71TzQLfdonN(param);
+        default: return null;
+      }
     }
 
-    function langForServer(i) {
-      if (i <= 3)  return "en";
-      if (i <= 5)  return "hi";
-      if (i <= 7)  return "bn";
-      if (i <= 9)  return "ta";
-      if (i <= 11) return "te";
-      if (i <= 13) return "ml";
-      return "kn";
+    // ── Exact port of PRORCPhandler ────────────────────────────
+    async function PRORCPhandler(prorcp, BASEDOM) {
+      try {
+        const r = await axios.get(`${BASEDOM}/prorcp/${prorcp}`, {
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": `${BASEDOM}/` },
+          timeout: 10000
+        });
+        const html = r.data || "";
+
+        // Find the last non-cpt JS script
+        const scripts = [...html.matchAll(/<script\s+src="\/([^"]*\.js)\?_=([^"]*)"><\/script>/gm)];
+        if (!scripts.length) return null;
+        let scriptPath = null;
+        const last = scripts[scripts.length - 1][0];
+        if (last.includes("cpt.js") && scripts.length >= 2) {
+          scriptPath = scripts[scripts.length - 2][1] + "?_=" + scripts[scripts.length - 2][2];
+        } else {
+          scriptPath = scripts[scripts.length - 1][1] + "?_=" + scripts[scripts.length - 1][2];
+        }
+
+        const jsRes = await axios.get(`${BASEDOM}/${scriptPath}`, {
+          headers: { "Referer": `${BASEDOM}/` }, timeout: 8000
+        });
+        const jsCode = jsRes.data || "";
+
+        // Extract decrypt function name and param — exact regex from vidsrc.ts
+        const decryptRegex = /\{\}\}window\[([^"]+)\("([^"]+)"\)\]/;
+        const decryptMatches = jsCode.match(decryptRegex);
+        if (!decryptMatches || decryptMatches.length < 3) return null;
+
+        const fnType  = decryptMatches[1].trim();  // e.g. "bMGyx71TzQLfdonN"
+        const fnParam = decryptMatches[2].trim();  // the encoded id string
+
+        // Get the element id by decrypting fnParam with fnType
+        const elemId = decrypt(fnParam, fnType);
+        if (!elemId) return null;
+
+        // Get the data from the element with that id
+        const idMatch = html.match(new RegExp(`id="${elemId}"[^>]*>([^<]*)<`));
+        if (!idMatch) return null;
+        const encData = idMatch[1].trim();
+
+        // Decrypt data using fnParam as the type key
+        const result = decrypt(encData, fnParam);
+        return result;
+      } catch(e) { return null; }
+    }
+
+    // ── Exact port of tmdbScrape ───────────────────────────────
+    async function tmdbScrape(tmdbId, type, season, episode) {
+      let BASEDOM = "https://whisperingauroras.com";
+      const url = type === "movie"
+        ? `https://vidsrc.net/embed/movie?tmdb=${tmdbId}`
+        : `https://vidsrc.net/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`;
+
+      const embedRes = await axios.get(url, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          "Referer": "https://vidsrc.net/" },
+        timeout: 12000
+      });
+      const html = embedRes.data || "";
+
+      // Parse BASEDOM from iframe src (same as serversLoad)
+      const iframeSrc = (html.match(/iframe[^>]+src=["']([^"']+)["']/i) || [])[1] || "";
+      if (iframeSrc) {
+        try {
+          const base = iframeSrc.startsWith("//") ? "https:" + iframeSrc : iframeSrc;
+          BASEDOM = new URL(base).origin;
+        } catch(e) {}
+      }
+
+      // Parse servers — .serversList .server elements with data-hash
+      const serverMatches = [...html.matchAll(/class="server[^"]*"[^>]*data-hash="([^"]+)"/g)];
+      // also try reverse attr order
+      const serverMatches2 = [...html.matchAll(/data-hash="([^"]+)"[^>]*class="server/g)];
+      const hashes = [...new Set([
+        ...serverMatches.map(m => m[1]),
+        ...serverMatches2.map(m => m[1])
+      ])].filter(Boolean);
+
+      if (!hashes.length) return [];
+
+      const results = [];
+      await Promise.all(hashes.slice(0, 3).map(async (hash) => {
+        try {
+          const rcpRes = await axios.get(`${BASEDOM}/rcp/${hash}`, {
+            headers: { "User-Agent": "Mozilla/5.0", "Referer": url }, timeout: 8000
+          });
+          const rcpHtml = rcpRes.data || "";
+
+          // rcpGrabber: find src: '...'
+          const srcMatch = rcpHtml.match(/src:\s*'([^']*)'/);
+          if (!srcMatch) return;
+          const srcData = srcMatch[1];
+
+          if (srcData.startsWith("/prorcp/")) {
+            const stream = await PRORCPhandler(srcData.replace("/prorcp/", ""), BASEDOM);
+            if (stream && (stream.includes(".m3u8") || stream.includes(".mp4"))) {
+              const finalUrl = stream.startsWith("//") ? "https:" + stream : stream;
+              results.push({ name: "VidSrc", image: "", mediaId: tmdbId, stream: finalUrl, referer: BASEDOM });
+            }
+          }
+        } catch(e) {}
+      }));
+
+      return results;
     }
 
     try {
-      const baseUrl = type === "tv"
-        ? `https://test.autoembed.cc/api/server?id=${tmdbId}&ss=${season}&ep=${episode}`
-        : `https://test.autoembed.cc/api/server?id=${tmdbId}`;
-
-      const DOMAIN = "https://player.vidsrc.co/";
-      const headers = {
-        "Referer": DOMAIN,
-        "Origin": DOMAIN,
-        "User-Agent": UA,
-        "Accept": "*/*"
-      };
-
-      // Fetch servers 1-11 in parallel (skip 12-15, very rare langs)
-      const serverNums = [1,2,3,4,5,6,7,8,9,10,11];
-      const results = await Promise.allSettled(
-        serverNums.map(async (i) => {
-          const r = await axios.get(`${baseUrl}&sr=${i}`, { headers, timeout: 8000 });
-          if (!r.data?.data) return null;
-          const data = decryptAutoEmbed(r.data.data);
-          let directUrl = data.url || "";
-          // Strip embed-proxy wrapper if present
-          if (directUrl.includes("embed-proxy")) {
-            const m = directUrl.match(/[?&]url=([^&]+)/);
-            if (m) directUrl = decodeURIComponent(m[1]);
-          }
-          if (!directUrl) return null;
-          return {
-            url: directUrl,
-            type: directUrl.includes(".mp4") ? "mp4" : "hls",
-            lang: langForServer(i),
-            server: i,
-            tracks: data.tracks || []
-          };
-        })
-      );
-
-      const streams = [];
-      const subtitles = [];
-      const seen = new Set();
-      for (const r of results) {
-        if (r.status === "fulfilled" && r.value) {
-          const { url, type: stype, lang, server, tracks } = r.value;
-          if (!seen.has(url)) {
-            seen.add(url);
-            streams.push({ url, type: stype, lang, server });
-            for (const t of tracks) {
-              if (t.file && t.kind === "captions") subtitles.push({ url: t.file, lang: t.label || t.srclang || "unknown" });
-            }
-          }
-        }
-      }
-
-      res.end(JSON.stringify({ streams, subtitles }));
+      const streams = await tmdbScrape(tmdbId, type, season, episode);
+      res.end(JSON.stringify(streams.length ? streams : []));
     } catch(e) {
       res.statusCode = 502;
-      res.end(JSON.stringify({ streams: [], error: e.message }));
+      res.end(JSON.stringify({ error: e.message }));
     }
     return;
   }
 
-  // ── /vixsrc — token-based HLS from vixsrc.to ─────────────────
-  // GET /vixsrc?tmdb=ID&type=movie
-  // GET /vixsrc?tmdb=ID&type=tv&s=1&e=1
-  // Returns: { streams: [{ url, quality, type, referer }] }
-  if (path === "/vixsrc") {
+
+  // ── /get-source — multi-provider parallel HLS extractor ─────────
+  // GET /get-source?tmdb=ID&type=movie|tv&s=1&e=1
+  // Fires vidsrc.icu + vidsrc.rip + embed.su + seapi.link in parallel.
+  // Returns: { streams: [{ url, quality, provider, referer, captions }], count }
+  if (path === "/get-source") {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Content-Type", "application/json");
-    const qs = new URL(req.url, "http://localhost").searchParams;
-    const tmdbId  = qs.get("tmdb") || "";
-    const type    = qs.get("type") || "movie";
-    const season  = qs.get("s") || "";
-    const episode = qs.get("e") || "";
-    if (!tmdbId) { res.statusCode = 400; res.end(JSON.stringify({ error: "tmdb required" })); return; }
+    const qs      = new URL(req.url, "http://localhost").searchParams;
+    const tmdbId  = qs.get("tmdb")  || "";
+    const imdbId  = qs.get("imdb")  || "";
+    const type    = qs.get("type")  || "movie";
+    const season  = qs.get("s")     || "1";
+    const episode = qs.get("e")     || "1";
+    if (!tmdbId && !imdbId) {
+      res.statusCode = 400;
+      res.end(JSON.stringify({ error: "tmdb or imdb required" }));
+      return;
+    }
 
-    const BASE = "https://vixsrc.to/";
-    const UA2  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150 Safari/537.36";
-    const HEADERS = {
-      "User-Agent": UA2,
-      "Accept": "application/json, text/javascript, */*; q=0.01",
-      "Accept-Language": "en-US,en;q=0.9",
-      "Referer": BASE,
-      "Origin": BASE.slice(0, -1)
-    };
+    const GS_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36";
+
+    // RC4 decrypt helper (used by some vidsrc providers)
+    function rc4(key, data) {
+      const kb = Buffer.from(key, "utf8");
+      const db = Buffer.from(data, "base64");
+      const S  = Array.from({ length: 256 }, (_, i) => i);
+      let j = 0;
+      for (let i = 0; i < 256; i++) {
+        j = (j + S[i] + kb[i % kb.length]) & 0xff;
+        [S[i], S[j]] = [S[j], S[i]];
+      }
+      let ci = 0; j = 0;
+      const out = [];
+      for (const byte of db) {
+        ci = (ci + 1) & 0xff;
+        j  = (j + S[ci]) & 0xff;
+        [S[ci], S[j]] = [S[j], S[ci]];
+        out.push(byte ^ S[(S[ci] + S[j]) & 0xff]);
+      }
+      return Buffer.from(out).toString("utf8");
+    }
+
+    // Generic vidsrc-family scraper: embed page → rcp hashes → prorcp/js decrypt → m3u8
+    async function scrapeVidsrcFamily(embedUrl, providerName, basedom) {
+      try {
+        const embedRes = await axios.get(embedUrl, {
+          headers: { "User-Agent": GS_UA, "Referer": basedom + "/" },
+          timeout: 12000, maxRedirects: 5,
+        });
+        const html = typeof embedRes.data === "string" ? embedRes.data : JSON.stringify(embedRes.data);
+
+        // Try to detect actual server base domain from iframe src
+        let BASEDOM = basedom;
+        const iframeM = html.match(/src=["'](https?:\/\/[^/'"]+\/embed\/[^"']*)['"]/i);
+        if (iframeM) { try { BASEDOM = new URL(iframeM[1]).origin; } catch(e) {} }
+
+        // Quick win: direct m3u8 in embed HTML
+        const directM = html.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/);
+        if (directM) return [{ url: directM[1], quality: "auto", provider: providerName, referer: BASEDOM, captions: [] }];
+
+        // Collect data-hash values → rcp endpoints
+        const hashes = new Set();
+        for (const m of html.matchAll(/data-hash="([^"]{6,})"/g)) hashes.add(m[1]);
+        for (const m of html.matchAll(/data-id="([^"]{6,})"/g))   hashes.add(m[1]);
+        if (!hashes.size) return [];
+
+        const results = [];
+        await Promise.allSettled([...hashes].slice(0, 4).map(async (hash) => {
+          try {
+            const rcpRes = await axios.get(`${BASEDOM}/rcp/${hash}`, {
+              headers: { "User-Agent": GS_UA, "Referer": embedUrl, "X-Requested-With": "XMLHttpRequest" },
+              timeout: 8000,
+            });
+            const rcpHtml = typeof rcpRes.data === "string" ? rcpRes.data : JSON.stringify(rcpRes.data);
+
+            // rcpGrabber: look for src: '...' or src: "..."
+            const srcM = rcpHtml.match(/src:\s*['"]([^'"]+)['"]/);
+            if (!srcM) return;
+            const src = srcM[1];
+
+            // Direct m3u8 in rcp response
+            if (/\.m3u8/i.test(src)) {
+              results.push({ url: src.startsWith("//") ? "https:" + src : src, quality: "auto", provider: providerName, referer: BASEDOM, captions: [] });
+              return;
+            }
+
+            // prorcp: follow to JS key extraction + RC4 decrypt
+            const proUrl = src.startsWith("//") ? "https:" + src : (src.startsWith("http") ? src : `${BASEDOM}${src.startsWith("/") ? "" : "/"}${src}`);
+            const proRes = await axios.get(proUrl, { headers: { "User-Agent": GS_UA, "Referer": BASEDOM + "/" }, timeout: 8000 });
+            const proHtml = typeof proRes.data === "string" ? proRes.data : JSON.stringify(proRes.data);
+            const proBase = (() => { try { return new URL(proUrl).origin; } catch(e) { return BASEDOM; } })();
+
+            // Try direct m3u8 in prorcp page
+            const proM = proHtml.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/);
+            if (proM) { results.push({ url: proM[1], quality: "auto", provider: providerName, referer: proUrl, captions: [] }); return; }
+
+            // Find JS file (skip cpt.js / jquery)
+            const jsFiles = [...proHtml.matchAll(/src=["']([^"']+\.js[^"']*)['"]/g)].map(m => m[1])
+              .filter(s => !s.includes("cpt.js") && !s.includes("jquery") && !s.includes("cdn."));
+            if (!jsFiles.length) return;
+            const jsRaw = jsFiles[0];
+            const jsUrl = jsRaw.startsWith("http") ? jsRaw : (jsRaw.startsWith("//") ? "https:" + jsRaw : `${proBase}/${jsRaw.replace(/^\//, "")}`);
+            const jsRes = await axios.get(jsUrl, { headers: { "User-Agent": GS_UA, "Referer": proUrl }, timeout: 6000 });
+            const jsCode = typeof jsRes.data === "string" ? jsRes.data : "";
+
+            // Extract RC4 key from JS
+            const keyM = jsCode.match(/(?:key|k|_key|secret)\s*[:=]\s*["']([a-zA-Z0-9!@#$%^&*()_+\-=<>?,./\;:~`"]{8,48})["']/);
+            // Extract encrypted data from prorcp page
+            const encM = proHtml.match(/data(?:-(?:src|url|stream|enc))?\s*[:=]\s*["']([A-Za-z0-9+/=]{20,})["']/);
+            if (!keyM || !encM) return;
+
+            const decrypted = rc4(keyM[1], encM[1]);
+            if (!decrypted.includes(".m3u8") && !decrypted.includes(".mp4")) return;
+            const finalUrl = decrypted.startsWith("//") ? "https:" + decrypted : decrypted;
+            results.push({ url: finalUrl, quality: "auto", provider: providerName, referer: proUrl, captions: [] });
+          } catch(e) {}
+        }));
+        return results;
+      } catch(e) { return []; }
+    }
+
+    // embed.su: base64 config → /api/e/{hash} → sources + captions
+    async function scrapeEmbedSu(id, isTV, season, episode) {
+      try {
+        const embedUrl = isTV
+          ? `https://embed.su/embed/tv/${id}/${season}/${episode}`
+          : `https://embed.su/embed/movie/${id}`;
+        const embedRes = await axios.get(embedUrl, {
+          headers: { "User-Agent": GS_UA, "Referer": "https://embed.su/" },
+          timeout: 10000,
+        });
+        const html = typeof embedRes.data === "string" ? embedRes.data : "";
+        const cfgM = html.match(/e\s*=\s*["']([A-Za-z0-9+/=]{20,})["']/);
+        if (!cfgM) return [];
+        let config;
+        try { config = JSON.parse(Buffer.from(cfgM[1], "base64").toString("utf8")); } catch(e) { return []; }
+        const hash = config?.hash || config?.h || "";
+        if (!hash) return [];
+        const apiRes = await axios.get(`https://embed.su/api/e/${hash}`, {
+          headers: { "User-Agent": GS_UA, "Referer": embedUrl },
+          timeout: 8000,
+        });
+        const data     = apiRes.data;
+        const sources  = data?.sources  || data?.stream    || [];
+        const caps     = data?.captions || data?.subtitles || [];
+        const captions = caps.map(c => ({ file: c.file || c.url, label: c.label || c.language || "English", kind: "captions" }));
+        return sources
+          .filter(s => s?.file || s?.url)
+          .map(s => ({ url: s.file || s.url, quality: s.quality || s.label || "auto", provider: "embed.su", referer: "https://embed.su/", captions }));
+      } catch(e) { return []; }
+    }
+
+    // seapi.link (multiembed backend): direct JSON API
+    async function scrapeSeapi(id, isTV, season, episode) {
+      try {
+        const base   = `https://seapi.link/?type=tmdb&id=${id}`;
+        const apiUrl = isTV
+          ? `${base}&season=${season}&episode=${episode}&max_results=5`
+          : `${base}&max_results=5`;
+        const r = await axios.get(apiUrl, {
+          headers: { "User-Agent": GS_UA, "Referer": "https://multiembed.mov/", "Origin": "https://multiembed.mov" },
+          timeout: 15000,
+        });
+        const streams = r.data?.streams || r.data?.sources || [];
+        return streams
+          .filter(s => s?.url && (s.url.includes(".m3u8") || s.url.includes(".mp4")))
+          .map(s => ({ url: s.url, quality: s.quality || "auto", provider: "seapi/multiembed", referer: "https://multiembed.mov/", captions: [] }));
+      } catch(e) { return []; }
+    }
 
     try {
-      // Build page URL
-      let pageUrl;
-      if (type === "tv") {
-        if (!season || !episode) { res.statusCode = 400; res.end(JSON.stringify({ error: "s and e required" })); return; }
-        pageUrl = `${BASE}tv/${tmdbId}/${season}/${episode}`;
-      } else {
-        pageUrl = `${BASE}movie/${tmdbId}`;
-      }
+      const isTV = type === "tv";
+      const id   = tmdbId || imdbId;
 
-      // Fetch HTML page
-      const pageRes = await axios.get(pageUrl, { headers: HEADERS, timeout: 10000, maxRedirects: 5 });
-      const html = typeof pageRes.data === "string" ? pageRes.data : JSON.stringify(pageRes.data);
+      // Build embed URLs for each provider
+      const icuUrl = isTV
+        ? `https://vidsrc.icu/embed/tv/${id}/${season}/${episode}`
+        : `https://vidsrc.icu/embed/movie/${id}`;
+      const ripUrl = isTV
+        ? `https://vidsrc.rip/embed/tv?tmdb=${id}&season=${season}&episode=${episode}`
+        : `https://vidsrc.rip/embed/movie?tmdb=${id}`;
 
-      // Extract token, expires, playlist URL
-      const token   = html.match(/['"]token['"]\s*:\s*['"]([^'"]+)['"]/)?.[1];
-      const expires = html.match(/['"]expires['"]\s*:\s*['"]([^'"]+)['"]/)?.[1];
-      const playlist = html.match(/url\s*:\s*['"]([^'"]+)['"]/)?.[1];
+      // Fire all 4 providers in parallel — don't let one timeout block others
+      const [icuR, ripR, suR, seapiR] = await Promise.allSettled([
+        scrapeVidsrcFamily(icuUrl,  "vidsrc.icu", "https://vidsrc.icu"),
+        scrapeVidsrcFamily(ripUrl,  "vidsrc.rip", "https://vidsrc.rip"),
+        scrapeEmbedSu(id, isTV, season, episode),
+        scrapeSeapi(id, isTV, season, episode),
+      ]);
 
-      if (!token || !expires || !playlist) {
-        res.end(JSON.stringify({ streams: [], error: "could not extract token/playlist from page", debug: pageUrl }));
-        return;
-      }
+      const streams = [
+        ...(icuR.status   === "fulfilled" ? icuR.value   : []),
+        ...(ripR.status   === "fulfilled" ? ripR.value   : []),
+        ...(suR.status    === "fulfilled" ? suR.value    : []),
+        ...(seapiR.status === "fulfilled" ? seapiR.value : []),
+      ].filter(s => s?.url);
 
-      // Check token not expired
-      const expiresMs = parseInt(expires) * 1000;
-      if (expiresMs - 60000 < Date.now()) {
-        res.end(JSON.stringify({ streams: [], error: "token expired" }));
-        return;
-      }
-
-      // Fetch master m3u8
-      const sep = playlist.includes("?") ? "&" : "?";
-      const masterUrl = `${playlist}${sep}token=${token}&expires=${expires}&h=1&lang=en`;
-      const m3u8Res = await axios.get(masterUrl, {
-        headers: { ...HEADERS, Referer: pageUrl },
-        timeout: 8000
-      });
-      const m3u8 = typeof m3u8Res.data === "string" ? m3u8Res.data : "";
-
-      // Parse quality variants from master playlist
-      const streams = [];
-      const lines = m3u8.split("\n");
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (line.startsWith("#EXT-X-STREAM-INF:")) {
-          const resMat = line.match(/RESOLUTION=\d+x(\d+)/);
-          const quality = resMat ? parseInt(resMat[1]) : 0;
-          const next = lines[i + 1]?.trim();
-          if (next && next.startsWith("https://")) {
-            streams.push({ url: next, quality: quality ? quality + "p" : "auto", type: "hls", referer: pageUrl });
-          }
-        }
-      }
-
-      // If no variants found, use masterUrl directly
-      if (streams.length === 0 && m3u8.includes("#EXTM3U")) {
-        streams.push({ url: masterUrl, quality: "auto", type: "hls", referer: pageUrl });
-      }
-
-      // Sort highest quality first
-      streams.sort((a, b) => parseInt(b.quality) - parseInt(a.quality));
-
-      res.end(JSON.stringify({ streams, masterUrl }));
+      res.end(JSON.stringify({ streams, count: streams.length }));
     } catch(e) {
       res.statusCode = 502;
       res.end(JSON.stringify({ streams: [], error: e.message }));
