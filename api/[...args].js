@@ -1052,7 +1052,6 @@ module.exports = async (req, res) => {
     }
 
     const TMDB_KEY_GS = "4ef0d7355d9ffb5151e987764708ce96";
-    const TMDB_KEY = TMDB_KEY_GS;
     const GS_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36";
 
     // RC4 decrypt
@@ -1074,237 +1073,216 @@ module.exports = async (req, res) => {
       return Buffer.from(out).toString("utf8");
     }
 
-    // Follows the RCP chain from a BASEDOM + hash → tries to extract m3u8
-    async function followRcp(hash, BASEDOM, referer) {
+    // ── KEY FINDING from debug2 ──────────────────────────────────────
+    // vidsrc.icu inner page (vidsrcme.vidsrc.icu) and vidsrc.me both use:
+    //   <iframe src="//cloudnestra.com/rcp/HASH"> — NOT ${origin}/rcp/HASH
+    // So the RCP base is always https://cloudnestra.com
+    // vidsrc.rip is a dead domain ("This domain is for sale") — skip entirely.
+    // ────────────────────────────────────────────────────────────────
+
+    const CLOUDNESTRA = "https://cloudnestra.com";
+
+    // Follow one RCP hash through cloudnestra → prorcp → JS key → RC4 → m3u8
+    async function followCloudnestraRcp(hash, referer) {
       try {
-        const rcpRes = await axios.get(`${BASEDOM}/rcp/${hash}`, {
+        const rcpUrl = `${CLOUDNESTRA}/rcp/${hash}`;
+        const rcpRes = await axios.get(rcpUrl, {
           headers: { "User-Agent": GS_UA, "Referer": referer, "X-Requested-With": "XMLHttpRequest" },
-          timeout: 8000,
+          timeout: 10000,
         });
         const rcpHtml = typeof rcpRes.data === "string" ? rcpRes.data : JSON.stringify(rcpRes.data);
+
+        // Look for src: '...' pointing to prorcp or direct m3u8
         const srcM = rcpHtml.match(/src:\s*['"]([^'"]+)['"]/);
         if (!srcM) return null;
         const src = srcM[1];
 
+        // Direct m3u8
         if (/\.m3u8/i.test(src)) return src.startsWith("//") ? "https:" + src : src;
 
+        // Build prorcp URL
         const proUrl = src.startsWith("//") ? "https:" + src
-          : src.startsWith("http") ? src : `${BASEDOM}${src.startsWith("/") ? "" : "/"}${src}`;
+          : src.startsWith("http") ? src
+          : `${CLOUDNESTRA}${src.startsWith("/") ? "" : "/"}${src}`;
+
         const proRes = await axios.get(proUrl, {
-          headers: { "User-Agent": GS_UA, "Referer": BASEDOM + "/" }, timeout: 8000,
+          headers: { "User-Agent": GS_UA, "Referer": CLOUDNESTRA + "/" },
+          timeout: 10000,
         });
         const proHtml = typeof proRes.data === "string" ? proRes.data : JSON.stringify(proRes.data);
 
         // Direct m3u8 in prorcp page
-        const proM = proHtml.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/);
-        if (proM) return proM[1];
+        const directM = proHtml.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/);
+        if (directM) return directM[1];
 
-        // JS key + RC4 decrypt
-        const proBase = (() => { try { return new URL(proUrl).origin; } catch(e) { return BASEDOM; } })();
-        const jsFiles = [...proHtml.matchAll(/src=["']([^"']+\.js[^"']*)["']/g)].map(m => m[1])
-          .filter(s => !s.includes("cpt.js") && !s.includes("jquery"));
+        // Find key JS (skip cpt.js, jquery, cdn files)
+        const proBase = (() => { try { return new URL(proUrl).origin; } catch(e) { return CLOUDNESTRA; } })();
+        const jsFiles = [...proHtml.matchAll(/src=["']([^"']+\.js[^"']*)["']/g)]
+          .map(m => m[1])
+          .filter(s => !s.includes("cpt.js") && !s.includes("jquery") && !s.includes("cloudflare") && !s.includes("unpkg"));
         if (!jsFiles.length) return null;
+
         const jsRaw = jsFiles[0];
         const jsUrl = jsRaw.startsWith("http") ? jsRaw
-          : jsRaw.startsWith("//") ? "https:" + jsRaw : `${proBase}/${jsRaw.replace(/^\//, "")}`;
-        const jsRes  = await axios.get(jsUrl, { headers: { "User-Agent": GS_UA, "Referer": proUrl }, timeout: 6000 });
+          : jsRaw.startsWith("//") ? "https:" + jsRaw
+          : `${proBase}/${jsRaw.replace(/^\//, "")}`;
+
+        const jsRes  = await axios.get(jsUrl, { headers: { "User-Agent": GS_UA, "Referer": proUrl }, timeout: 8000 });
         const jsCode = typeof jsRes.data === "string" ? jsRes.data : "";
-        const keyM   = jsCode.match(/(?:key|k|_key|secret)\s*[:=]\s*["']([\x20-\x7e]{8,64})["']/);
-        const encM   = proHtml.match(/data(?:-(?:src|url|stream|enc))?\s*[:=]\s*["']([A-Za-z0-9+/=]{20,})["']/);
-        if (!keyM || !encM) return null;
-        const dec = rc4(keyM[1], encM[1]);
-        if (!dec.includes(".m3u8") && !dec.includes(".mp4")) return null;
-        return dec.startsWith("//") ? "https:" + dec : dec;
+
+        // Extract RC4 key — look for quoted string 8–64 chars assigned to key/k/secret
+        const keyM = jsCode.match(/(?:^|[,;{\s])(?:key|k|_key|secret|password)\s*[:=]\s*["']([^"']{8,64})["']/m);
+        if (!keyM) return null;
+
+        // Extract encrypted data blob from prorcp page
+        const encM = proHtml.match(/data(?:-(?:src|url|stream|enc))?\s*[:=]\s*["']([A-Za-z0-9+/=]{20,})["']/);
+        if (!encM) return null;
+
+        const decrypted = rc4(keyM[1], encM[1]);
+        if (!decrypted.includes(".m3u8") && !decrypted.includes(".mp4")) return null;
+        return decrypted.startsWith("//") ? "https:" + decrypted : decrypted;
       } catch(e) { return null; }
     }
 
-    // vidsrc.icu scraper
-    // Outer page has: <iframe src="https://vidsrcme.vidsrc.icu/embed/movie?tmdb=...">
-    // Must follow that iframe, then find data-hash in THAT page
+    // vidsrc.icu: outer → iframe(vidsrcme.vidsrc.icu) → data-hash → cloudnestra RCP
     async function scrapeVidsrcIcu(tmdbId, isTV, season, episode) {
       try {
         const outerUrl = isTV
           ? `https://vidsrc.icu/embed/tv/${tmdbId}/${season}/${episode}`
           : `https://vidsrc.icu/embed/movie/${tmdbId}`;
+
         const outerRes = await axios.get(outerUrl, {
           headers: { "User-Agent": GS_UA, "Referer": "https://vidsrc.icu/" },
           timeout: 10000, maxRedirects: 5,
         });
         const outerHtml = typeof outerRes.data === "string" ? outerRes.data : "";
 
-        // Extract iframe src — e.g. https://vidsrcme.vidsrc.icu/embed/movie?tmdb=550&...
+        // Get the inner iframe URL (vidsrcme.vidsrc.icu/embed/...)
         const iframeM = outerHtml.match(/src=["'](https?:\/\/[^"']+\/embed\/[^"']*)["']/i);
         if (!iframeM) return [];
         const innerUrl = iframeM[1];
-        const innerOrigin = (() => { try { return new URL(innerUrl).origin; } catch(e) { return "https://vidsrc.icu"; } })();
 
-        // Fetch the inner iframe page — this should have data-hash attributes
         const innerRes = await axios.get(innerUrl, {
           headers: { "User-Agent": GS_UA, "Referer": outerUrl },
           timeout: 10000, maxRedirects: 5,
         });
         const innerHtml = typeof innerRes.data === "string" ? innerRes.data : "";
 
-        // Quick win: m3u8 directly
+        // Quick win: direct m3u8
         const directM = innerHtml.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/);
-        if (directM) return [{ url: directM[1], quality: "auto", provider: "vidsrc.icu", referer: innerOrigin, captions: [] }];
+        if (directM) return [{ url: directM[1], quality: "auto", provider: "vidsrc.icu", referer: CLOUDNESTRA, captions: [] }];
 
-        // Collect hashes
+        // Collect data-hash values (RCP is always at cloudnestra.com/rcp/HASH)
         const hashes = new Set();
         for (const m of innerHtml.matchAll(/data-hash="([^"]{6,})"/g)) hashes.add(m[1]);
-        for (const m of innerHtml.matchAll(/data-id="([^"]{6,})"/g))   hashes.add(m[1]);
-
-        // Also look for /rcp/ or /prorcp/ paths directly in script tags
-        for (const m of innerHtml.matchAll(/\/rcp\/([a-zA-Z0-9_-]{6,})/g)) hashes.add(m[1]);
-
+        // Also pick up hashes from iframe src attrs like //cloudnestra.com/rcp/HASH
+        for (const m of innerHtml.matchAll(/\/rcp\/([A-Za-z0-9_\-=+]{6,})/g)) hashes.add(m[1]);
         if (!hashes.size) return [];
 
         const results = [];
-        await Promise.allSettled([...hashes].slice(0, 4).map(async (hash) => {
-          const url = await followRcp(hash, innerOrigin, innerUrl);
-          if (url) results.push({ url, quality: "auto", provider: "vidsrc.icu", referer: innerOrigin, captions: [] });
+        await Promise.allSettled([...hashes].slice(0, 3).map(async (hash) => {
+          const url = await followCloudnestraRcp(hash, innerUrl);
+          if (url) results.push({ url, quality: "auto", provider: "vidsrc.icu", referer: CLOUDNESTRA, captions: [] });
         }));
         return results;
       } catch(e) { return []; }
     }
 
-    // vidsrc.rip scraper
-    // Page is mostly JS-rendered. Look for API call patterns in the HTML/JS.
-    async function scrapeVidsrcRip(tmdbId, isTV, season, episode) {
+    // vidsrc.me: embed page → data-hash → cloudnestra RCP (same chain)
+    async function scrapeVidsrcMe(tmdbId, isTV, season, episode) {
       try {
-        const embedUrl = isTV
-          ? `https://vidsrc.rip/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`
-          : `https://vidsrc.rip/embed/movie?tmdb=${tmdbId}`;
-        const res1 = await axios.get(embedUrl, {
-          headers: { "User-Agent": GS_UA, "Referer": "https://vidsrc.rip/" },
-          timeout: 10000, maxRedirects: 5,
-        });
-        const html = typeof res1.data === "string" ? res1.data : "";
-
-        // Direct m3u8
-        const directM = html.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/);
-        if (directM) return [{ url: directM[1], quality: "auto", provider: "vidsrc.rip", referer: "https://vidsrc.rip", captions: [] }];
-
-        // Look for API endpoints embedded in JS: fetch('/api/source/...') or similar
-        const apiPaths = [...html.matchAll(/fetch\s*\(\s*['"](\/api\/[^'"]+)['"]/g)].map(m => m[1]);
-        const apiUrls  = [...html.matchAll(/axios\.get\s*\(\s*['"](\/api\/[^'"]+)['"]/g)].map(m => m[1]);
-        const allApis  = [...new Set([...apiPaths, ...apiUrls])];
-
-        for (const apiPath of allApis.slice(0, 3)) {
-          try {
-            const apiUrl = `https://vidsrc.rip${apiPath}`;
-            const apiRes = await axios.get(apiUrl, {
-              headers: { "User-Agent": GS_UA, "Referer": embedUrl }, timeout: 8000,
-            });
-            const data = apiRes.data;
-            if (data?.url && data.url.includes(".m3u8"))
-              return [{ url: data.url, quality: "auto", provider: "vidsrc.rip", referer: "https://vidsrc.rip", captions: [] }];
-            if (Array.isArray(data?.sources))
-              return data.sources.filter(s => s?.file || s?.url)
-                .map(s => ({ url: s.file || s.url, quality: s.label || "auto", provider: "vidsrc.rip", referer: "https://vidsrc.rip", captions: [] }));
-          } catch(e) {}
-        }
-
-        // Look for JS files that might contain the player config
-        const jsFiles = [...html.matchAll(/src=["']([^"']+\.js[^"']*)["']/g)].map(m => m[1])
-          .filter(s => s.startsWith("/") && !s.includes("jquery") && !s.includes("bootstrap"));
-        for (const jsPath of jsFiles.slice(0, 3)) {
-          try {
-            const jsUrl = `https://vidsrc.rip${jsPath}`;
-            const jsRes = await axios.get(jsUrl, { headers: { "User-Agent": GS_UA, "Referer": embedUrl }, timeout: 6000 });
-            const jsCode = typeof jsRes.data === "string" ? jsRes.data : "";
-            const m3u8M = jsCode.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/);
-            if (m3u8M) return [{ url: m3u8M[1], quality: "auto", provider: "vidsrc.rip", referer: "https://vidsrc.rip", captions: [] }];
-          } catch(e) {}
-        }
-        return [];
-      } catch(e) { return []; }
-    }
-
-    // vidsrc.me scraper (IMDB-based, reliable fallback)
-    async function scrapeVidsrcMe(imdbId, tmdbId, isTV, season, episode) {
-      try {
-        // vidsrc.me requires IMDB id — fetch it from TMDB if not provided
-        let iid = imdbId;
-        if (!iid && tmdbId) {
-          try {
-            const t = isTV ? "tv" : "movie";
-            const extRes = await axios.get(
-              `https://api.themoviedb.org/3/${t}/${tmdbId}/external_ids?api_key=${TMDB_KEY}`,
-              { timeout: 5000 }
-            );
-            iid = extRes.data?.imdb_id || null;
-          } catch(e) {}
-        }
-        if (!iid) return [];
+        // Get IMDb ID from TMDB
+        let imdbId = null;
+        try {
+          const t = isTV ? "tv" : "movie";
+          const extRes = await axios.get(
+            `https://api.themoviedb.org/3/${t}/${tmdbId}/external_ids?api_key=${TMDB_KEY_GS}`,
+            { timeout: 5000 }
+          );
+          imdbId = extRes.data?.imdb_id || null;
+        } catch(e) {}
+        if (!imdbId) return [];
 
         const embedUrl = isTV
-          ? `https://vidsrc.me/embed/tv?imdb=${iid}&season=${season}&episode=${episode}`
-          : `https://vidsrc.me/embed/movie?imdb=${iid}`;
-        const res1 = await axios.get(embedUrl, {
+          ? `https://vidsrc.me/embed/tv?imdb=${imdbId}&season=${season}&episode=${episode}`
+          : `https://vidsrc.me/embed/movie?imdb=${imdbId}`;
+
+        const embedRes = await axios.get(embedUrl, {
           headers: { "User-Agent": GS_UA, "Referer": "https://vidsrc.me/" },
           timeout: 10000, maxRedirects: 5,
         });
-        const html = typeof res1.data === "string" ? res1.data : "";
+        const html = typeof embedRes.data === "string" ? embedRes.data : "";
 
+        // Quick win
         const directM = html.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/);
-        if (directM) return [{ url: directM[1], quality: "auto", provider: "vidsrc.me", referer: "https://vidsrc.me", captions: [] }];
+        if (directM) return [{ url: directM[1], quality: "auto", provider: "vidsrc.me", referer: CLOUDNESTRA, captions: [] }];
 
+        // Collect hashes — RCP base is cloudnestra.com (seen in all_src_attrs)
         const hashes = new Set();
         for (const m of html.matchAll(/data-hash="([^"]{6,})"/g)) hashes.add(m[1]);
-        for (const m of html.matchAll(/data-id="([^"]{6,})"/g))   hashes.add(m[1]);
+        for (const m of html.matchAll(/\/rcp\/([A-Za-z0-9_\-=+]{6,})/g)) hashes.add(m[1]);
         if (!hashes.size) return [];
 
-        const BASEDOM = "https://vidsrc.me";
         const results = [];
-        await Promise.allSettled([...hashes].slice(0, 4).map(async (hash) => {
-          const url = await followRcp(hash, BASEDOM, embedUrl);
-          if (url) results.push({ url, quality: "auto", provider: "vidsrc.me", referer: BASEDOM, captions: [] });
+        await Promise.allSettled([...hashes].slice(0, 3).map(async (hash) => {
+          const url = await followCloudnestraRcp(hash, embedUrl);
+          if (url) results.push({ url, quality: "auto", provider: "vidsrc.me", referer: CLOUDNESTRA, captions: [] });
         }));
         return results;
       } catch(e) { return []; }
     }
 
-    // superembed/multiembed JSON API (seapi.link replacement)
-    async function scrapeMultiembed(tmdbId, isTV, season, episode) {
+    // vidsrc.net fallback — uses the direct-stream scraper already in this file
+    // We call it inline here for /get-source as a 3rd fallback
+    async function scrapeVidsrcNet(tmdbId, isTV, season, episode) {
       try {
-        const apiUrl = isTV
-          ? `https://multiembed.mov/directstream.php?video_id=${tmdbId}&tmdb=1&s=${season}&e=${episode}`
-          : `https://multiembed.mov/directstream.php?video_id=${tmdbId}&tmdb=1`;
-        // Hit the API endpoint that returns JSON sources
-        const apiJsonUrl = isTV
-          ? `https://multiembed.mov/json.php?video_id=${tmdbId}&tmdb=1&s=${season}&e=${episode}`
-          : `https://multiembed.mov/json.php?video_id=${tmdbId}&tmdb=1`;
-        const r = await axios.get(apiJsonUrl, {
-          headers: { "User-Agent": GS_UA, "Referer": "https://multiembed.mov/", "Accept": "application/json" },
-          timeout: 10000,
+        const embedUrl = isTV
+          ? `https://vidsrc.net/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`
+          : `https://vidsrc.net/embed/movie?tmdb=${tmdbId}`;
+
+        const embedRes = await axios.get(embedUrl, {
+          headers: { "User-Agent": GS_UA, "Referer": "https://vidsrc.net/" },
+          timeout: 10000, maxRedirects: 5,
         });
-        const data = r.data;
-        if (data?.link && (data.link.includes(".m3u8") || data.link.includes(".mp4"))) {
-          return [{ url: data.link, quality: "auto", provider: "multiembed", referer: "https://multiembed.mov/", captions: [] }];
-        }
-        const sources = data?.sources || data?.streams || [];
-        return sources.filter(s => s?.file || s?.url)
-          .map(s => ({ url: s.file || s.url, quality: s.label || "auto", provider: "multiembed", referer: "https://multiembed.mov/", captions: [] }));
+        const html = typeof embedRes.data === "string" ? embedRes.data : "";
+
+        const directM = html.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/);
+        if (directM) return [{ url: directM[1], quality: "auto", provider: "vidsrc.net", referer: "https://vidsrc.net", captions: [] }];
+
+        // Parse BASEDOM from embed html
+        let BASEDOM = "https://cloudnestra.com";
+        const iframeM = html.match(/src=["'](https?:\/\/[^"']+\/embed\/[^"']*)["']/i);
+        if (iframeM) { try { BASEDOM = new URL(iframeM[1]).origin; } catch(e) {} }
+
+        const hashes = new Set();
+        for (const m of html.matchAll(/data-hash="([^"]{6,})"/g)) hashes.add(m[1]);
+        for (const m of html.matchAll(/\/rcp\/([A-Za-z0-9_\-=+]{6,})/g)) hashes.add(m[1]);
+        if (!hashes.size) return [];
+
+        const results = [];
+        await Promise.allSettled([...hashes].slice(0, 3).map(async (hash) => {
+          const url = await followCloudnestraRcp(hash, embedUrl);
+          if (url) results.push({ url, quality: "auto", provider: "vidsrc.net", referer: CLOUDNESTRA, captions: [] });
+        }));
+        return results;
       } catch(e) { return []; }
     }
 
     try {
-      const isTV  = type === "tv";
-      const id    = tmdbId || imdbId;
+      const isTV = type === "tv";
+      const id   = tmdbId || imdbId;
 
-      const [icuR, ripR, meR, multiR] = await Promise.allSettled([
+      // Fire all 3 working providers in parallel (vidsrc.rip is dead)
+      const [icuR, meR, netR] = await Promise.allSettled([
         scrapeVidsrcIcu(id, isTV, season, episode),
-        scrapeVidsrcRip(id, isTV, season, episode),
-        scrapeVidsrcMe(imdbId, tmdbId, isTV, season, episode),
-        scrapeMultiembed(id, isTV, season, episode),
+        scrapeVidsrcMe(id, isTV, season, episode),
+        scrapeVidsrcNet(id, isTV, season, episode),
       ]);
 
       const streams = [
-        ...(icuR.status   === "fulfilled" ? icuR.value   : []),
-        ...(ripR.status   === "fulfilled" ? ripR.value   : []),
-        ...(meR.status    === "fulfilled" ? meR.value    : []),
-        ...(multiR.status === "fulfilled" ? multiR.value : []),
+        ...(icuR.status === "fulfilled" ? icuR.value : []),
+        ...(meR.status  === "fulfilled" ? meR.value  : []),
+        ...(netR.status === "fulfilled" ? netR.value : []),
       ].filter(s => s?.url);
 
       res.end(JSON.stringify({ streams, count: streams.length }));
@@ -1312,115 +1290,6 @@ module.exports = async (req, res) => {
       res.statusCode = 502;
       res.end(JSON.stringify({ streams: [], error: e.message }));
     }
-    return;
-  }
-
-
-  // ── /debug2 — deep chain debug ───────────────────────────────
-  if (path === "/debug2") {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Content-Type", "application/json");
-    const qs     = new URL(req.url, "http://localhost").searchParams;
-    const tmdbId = qs.get("tmdb") || "550";
-    const UA     = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36";
-    const diag   = {};
-
-    // Step 1: vidsrc.icu outer page
-    try {
-      const outerUrl = `https://vidsrc.icu/embed/movie/${tmdbId}`;
-      const r1 = await axios.get(outerUrl, {
-        headers: { "User-Agent": UA, "Referer": "https://vidsrc.icu/" },
-        timeout: 10000, maxRedirects: 5,
-      });
-      const outerHtml = typeof r1.data === "string" ? r1.data : "";
-      // All iframes
-      const allIframes = [...outerHtml.matchAll(/src=["']([^"']+)["']/g)]
-        .map(m => m[1]).filter(u => u.startsWith("http") && u.includes("embed"));
-      diag.icu_outer = { status: r1.status, html_len: outerHtml.length, iframes: allIframes };
-
-      // Step 2: follow first iframe
-      if (allIframes.length) {
-        const innerUrl = allIframes[0];
-        const innerOrigin = (() => { try { return new URL(innerUrl).origin; } catch(e) { return ""; } })();
-        try {
-          const r2 = await axios.get(innerUrl, {
-            headers: { "User-Agent": UA, "Referer": outerUrl },
-            timeout: 10000, maxRedirects: 5,
-          });
-          const innerHtml = typeof r2.data === "string" ? r2.data : "";
-          const hashes = [...innerHtml.matchAll(/data-hash="([^"]{4,})"/g)].map(m => m[1]);
-          const dataIds = [...innerHtml.matchAll(/data-id="([^"]{4,})"/g)].map(m => m[1]);
-          const m3u8   = (innerHtml.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/) || [])[1] || null;
-          const rcpPaths = [...innerHtml.matchAll(/\/rcp\/([a-zA-Z0-9_=-]{4,})/g)].map(m => m[1]);
-          const scripts  = [...innerHtml.matchAll(/src=["']([^"']+\.js[^"']*)["']/g)].map(m => m[1]);
-          const allSrcs  = [...innerHtml.matchAll(/src=["']([^"']{4,})["']/g)].map(m => m[1]);
-          diag.icu_inner = {
-            status: r2.status, url: innerUrl, origin: innerOrigin,
-            html_len: innerHtml.length,
-            data_hashes: hashes, data_ids: dataIds,
-            rcp_paths: rcpPaths, m3u8, scripts,
-            all_src_attrs: allSrcs.slice(0, 20),
-            snippet: innerHtml.slice(0, 800),
-          };
-
-          // Step 3: try first rcp hash if found
-          const firstHash = [...hashes, ...rcpPaths][0];
-          if (firstHash && innerOrigin) {
-            try {
-              const rcpUrl = `${innerOrigin}/rcp/${firstHash}`;
-              const r3 = await axios.get(rcpUrl, {
-                headers: { "User-Agent": UA, "Referer": innerUrl, "X-Requested-With": "XMLHttpRequest" },
-                timeout: 8000,
-              });
-              const rcpHtml = typeof r3.data === "string" ? r3.data : JSON.stringify(r3.data);
-              diag.icu_rcp = { status: r3.status, url: rcpUrl, snippet: rcpHtml.slice(0, 600) };
-            } catch(e) { diag.icu_rcp = { error: e.message }; }
-          }
-        } catch(e) { diag.icu_inner = { error: e.message, url: innerUrl }; }
-      }
-    } catch(e) { diag.icu_outer = { error: e.message }; }
-
-    // Step 4: vidsrc.rip full HTML dump
-    try {
-      const ripUrl = `https://vidsrc.rip/embed/movie?tmdb=${tmdbId}`;
-      const r4 = await axios.get(ripUrl, {
-        headers: { "User-Agent": UA, "Referer": "https://vidsrc.rip/" },
-        timeout: 10000, maxRedirects: 5,
-      });
-      const html = typeof r4.data === "string" ? r4.data : "";
-      const scripts = [...html.matchAll(/src=["']([^"']+\.js[^"']*)["']/g)].map(m => m[1]);
-      const fetchPaths = [...html.matchAll(/fetch\s*\(\s*["']([^"']+)["']/g)].map(m => m[1]);
-      const iframes = [...html.matchAll(/src=["']([^"']+)["']/g)].map(m => m[1]).filter(u => u.startsWith("http"));
-      diag.vidsrc_rip = {
-        status: r4.status, html_len: html.length,
-        scripts, fetch_calls: fetchPaths, iframes,
-        full_html: html,
-      };
-    } catch(e) { diag.vidsrc_rip = { error: e.message }; }
-
-    // Step 5: vidsrc.me with imdb id
-    try {
-      const extRes = await axios.get(
-        `https://api.themoviedb.org/3/movie/550/external_ids?api_key=4ef0d7355d9ffb5151e987764708ce96`,
-        { timeout: 5000 }
-      );
-      const imdbId = extRes.data?.imdb_id;
-      diag.imdb_id = imdbId;
-      if (imdbId) {
-        const meUrl = `https://vidsrc.me/embed/movie?imdb=${imdbId}`;
-        const r5 = await axios.get(meUrl, {
-          headers: { "User-Agent": UA, "Referer": "https://vidsrc.me/" },
-          timeout: 10000, maxRedirects: 5,
-        });
-        const html = typeof r5.data === "string" ? r5.data : "";
-        const hashes = [...html.matchAll(/data-hash="([^"]{4,})"/g)].map(m => m[1]);
-        const m3u8  = (html.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/) || [])[1] || null;
-        const iframes = [...html.matchAll(/src=["']([^"']+)["']/g)].map(m => m[1]).filter(u => u.startsWith("http"));
-        diag.vidsrc_me = { status: r5.status, url: meUrl, html_len: html.length, hashes, m3u8, iframes, snippet: html.slice(0, 600) };
-      }
-    } catch(e) { diag.vidsrc_me = { error: e.message }; }
-
-    res.end(JSON.stringify(diag, null, 2));
     return;
   }
 
