@@ -239,11 +239,13 @@ module.exports = async (req, res) => {
 
   // ── /stream-proxy ─────────────────────────────────────────────
   if (path === "/stream-proxy") {
-    const rawUrl = req.url || "";
-    const urlIdx = rawUrl.indexOf("?url=");
-    const rawTarget = urlIdx >= 0 ? rawUrl.slice(urlIdx + 5) : "";
+    const _spParsed = new URL(req.url, "http://localhost");
+    const rawTarget = _spParsed.searchParams.get("url") || "";
+    const rawReferer = _spParsed.searchParams.get("referer") || "";
     let targetUrl = "";
     try { targetUrl = decodeURIComponent(rawTarget); } catch(e) { targetUrl = rawTarget; }
+    let refererUrl = "";
+    try { refererUrl = rawReferer ? decodeURIComponent(rawReferer) : ""; } catch(e) { refererUrl = rawReferer; }
     if (!targetUrl.startsWith("https://") && !targetUrl.startsWith("http://")) {
       res.statusCode = 400; res.end(JSON.stringify({ error: "invalid url" })); return;
     }
@@ -259,6 +261,7 @@ module.exports = async (req, res) => {
         if (redirectCount > 5) { res.statusCode = 502; res.end("too many redirects"); return; }
         const mod = url.startsWith("https") ? https : http;
         const upstreamHeaders = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Accept": "*/*" };
+        if (refererUrl) { upstreamHeaders["Referer"] = refererUrl; upstreamHeaders["Origin"] = new URL(refererUrl).origin; }
         if (req.headers["range"]) upstreamHeaders["Range"] = req.headers["range"];
         const u = new URL(url);
         const upReq = mod.request({
