@@ -1051,9 +1051,11 @@ module.exports = async (req, res) => {
       return;
     }
 
+    const TMDB_KEY_GS = "4ef0d7355d9ffb5151e987764708ce96";
+    const TMDB_KEY = TMDB_KEY_GS;
     const GS_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36";
 
-    // RC4 decrypt helper (used by some vidsrc providers)
+    // RC4 decrypt
     function rc4(key, data) {
       const kb = Buffer.from(key, "utf8");
       const db = Buffer.from(data, "base64");
@@ -1063,170 +1065,246 @@ module.exports = async (req, res) => {
         j = (j + S[i] + kb[i % kb.length]) & 0xff;
         [S[i], S[j]] = [S[j], S[i]];
       }
-      let ci = 0; j = 0;
-      const out = [];
+      let ci = 0; j = 0; const out = [];
       for (const byte of db) {
-        ci = (ci + 1) & 0xff;
-        j  = (j + S[ci]) & 0xff;
+        ci = (ci + 1) & 0xff; j = (j + S[ci]) & 0xff;
         [S[ci], S[j]] = [S[j], S[ci]];
         out.push(byte ^ S[(S[ci] + S[j]) & 0xff]);
       }
       return Buffer.from(out).toString("utf8");
     }
 
-    // Generic vidsrc-family scraper: embed page → rcp hashes → prorcp/js decrypt → m3u8
-    async function scrapeVidsrcFamily(embedUrl, providerName, basedom) {
+    // Follows the RCP chain from a BASEDOM + hash → tries to extract m3u8
+    async function followRcp(hash, BASEDOM, referer) {
       try {
-        const embedRes = await axios.get(embedUrl, {
-          headers: { "User-Agent": GS_UA, "Referer": basedom + "/" },
-          timeout: 12000, maxRedirects: 5,
+        const rcpRes = await axios.get(`${BASEDOM}/rcp/${hash}`, {
+          headers: { "User-Agent": GS_UA, "Referer": referer, "X-Requested-With": "XMLHttpRequest" },
+          timeout: 8000,
         });
-        const html = typeof embedRes.data === "string" ? embedRes.data : JSON.stringify(embedRes.data);
+        const rcpHtml = typeof rcpRes.data === "string" ? rcpRes.data : JSON.stringify(rcpRes.data);
+        const srcM = rcpHtml.match(/src:\s*['"]([^'"]+)['"]/);
+        if (!srcM) return null;
+        const src = srcM[1];
 
-        // Try to detect actual server base domain from iframe src
-        let BASEDOM = basedom;
-        const iframeM = html.match(/src=["'](https?:\/\/[^/'"]+\/embed\/[^"']*)['"]/i);
-        if (iframeM) { try { BASEDOM = new URL(iframeM[1]).origin; } catch(e) {} }
+        if (/\.m3u8/i.test(src)) return src.startsWith("//") ? "https:" + src : src;
 
-        // Quick win: direct m3u8 in embed HTML
-        const directM = html.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/);
-        if (directM) return [{ url: directM[1], quality: "auto", provider: providerName, referer: BASEDOM, captions: [] }];
+        const proUrl = src.startsWith("//") ? "https:" + src
+          : src.startsWith("http") ? src : `${BASEDOM}${src.startsWith("/") ? "" : "/"}${src}`;
+        const proRes = await axios.get(proUrl, {
+          headers: { "User-Agent": GS_UA, "Referer": BASEDOM + "/" }, timeout: 8000,
+        });
+        const proHtml = typeof proRes.data === "string" ? proRes.data : JSON.stringify(proRes.data);
 
-        // Collect data-hash values → rcp endpoints
+        // Direct m3u8 in prorcp page
+        const proM = proHtml.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/);
+        if (proM) return proM[1];
+
+        // JS key + RC4 decrypt
+        const proBase = (() => { try { return new URL(proUrl).origin; } catch(e) { return BASEDOM; } })();
+        const jsFiles = [...proHtml.matchAll(/src=["']([^"']+\.js[^"']*)["']/g)].map(m => m[1])
+          .filter(s => !s.includes("cpt.js") && !s.includes("jquery"));
+        if (!jsFiles.length) return null;
+        const jsRaw = jsFiles[0];
+        const jsUrl = jsRaw.startsWith("http") ? jsRaw
+          : jsRaw.startsWith("//") ? "https:" + jsRaw : `${proBase}/${jsRaw.replace(/^\//, "")}`;
+        const jsRes  = await axios.get(jsUrl, { headers: { "User-Agent": GS_UA, "Referer": proUrl }, timeout: 6000 });
+        const jsCode = typeof jsRes.data === "string" ? jsRes.data : "";
+        const keyM   = jsCode.match(/(?:key|k|_key|secret)\s*[:=]\s*["']([\x20-\x7e]{8,64})["']/);
+        const encM   = proHtml.match(/data(?:-(?:src|url|stream|enc))?\s*[:=]\s*["']([A-Za-z0-9+/=]{20,})["']/);
+        if (!keyM || !encM) return null;
+        const dec = rc4(keyM[1], encM[1]);
+        if (!dec.includes(".m3u8") && !dec.includes(".mp4")) return null;
+        return dec.startsWith("//") ? "https:" + dec : dec;
+      } catch(e) { return null; }
+    }
+
+    // vidsrc.icu scraper
+    // Outer page has: <iframe src="https://vidsrcme.vidsrc.icu/embed/movie?tmdb=...">
+    // Must follow that iframe, then find data-hash in THAT page
+    async function scrapeVidsrcIcu(tmdbId, isTV, season, episode) {
+      try {
+        const outerUrl = isTV
+          ? `https://vidsrc.icu/embed/tv/${tmdbId}/${season}/${episode}`
+          : `https://vidsrc.icu/embed/movie/${tmdbId}`;
+        const outerRes = await axios.get(outerUrl, {
+          headers: { "User-Agent": GS_UA, "Referer": "https://vidsrc.icu/" },
+          timeout: 10000, maxRedirects: 5,
+        });
+        const outerHtml = typeof outerRes.data === "string" ? outerRes.data : "";
+
+        // Extract iframe src — e.g. https://vidsrcme.vidsrc.icu/embed/movie?tmdb=550&...
+        const iframeM = outerHtml.match(/src=["'](https?:\/\/[^"']+\/embed\/[^"']*)["']/i);
+        if (!iframeM) return [];
+        const innerUrl = iframeM[1];
+        const innerOrigin = (() => { try { return new URL(innerUrl).origin; } catch(e) { return "https://vidsrc.icu"; } })();
+
+        // Fetch the inner iframe page — this should have data-hash attributes
+        const innerRes = await axios.get(innerUrl, {
+          headers: { "User-Agent": GS_UA, "Referer": outerUrl },
+          timeout: 10000, maxRedirects: 5,
+        });
+        const innerHtml = typeof innerRes.data === "string" ? innerRes.data : "";
+
+        // Quick win: m3u8 directly
+        const directM = innerHtml.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/);
+        if (directM) return [{ url: directM[1], quality: "auto", provider: "vidsrc.icu", referer: innerOrigin, captions: [] }];
+
+        // Collect hashes
         const hashes = new Set();
-        for (const m of html.matchAll(/data-hash="([^"]{6,})"/g)) hashes.add(m[1]);
-        for (const m of html.matchAll(/data-id="([^"]{6,})"/g))   hashes.add(m[1]);
+        for (const m of innerHtml.matchAll(/data-hash="([^"]{6,})"/g)) hashes.add(m[1]);
+        for (const m of innerHtml.matchAll(/data-id="([^"]{6,})"/g))   hashes.add(m[1]);
+
+        // Also look for /rcp/ or /prorcp/ paths directly in script tags
+        for (const m of innerHtml.matchAll(/\/rcp\/([a-zA-Z0-9_-]{6,})/g)) hashes.add(m[1]);
+
         if (!hashes.size) return [];
 
         const results = [];
         await Promise.allSettled([...hashes].slice(0, 4).map(async (hash) => {
-          try {
-            const rcpRes = await axios.get(`${BASEDOM}/rcp/${hash}`, {
-              headers: { "User-Agent": GS_UA, "Referer": embedUrl, "X-Requested-With": "XMLHttpRequest" },
-              timeout: 8000,
-            });
-            const rcpHtml = typeof rcpRes.data === "string" ? rcpRes.data : JSON.stringify(rcpRes.data);
-
-            // rcpGrabber: look for src: '...' or src: "..."
-            const srcM = rcpHtml.match(/src:\s*['"]([^'"]+)['"]/);
-            if (!srcM) return;
-            const src = srcM[1];
-
-            // Direct m3u8 in rcp response
-            if (/\.m3u8/i.test(src)) {
-              results.push({ url: src.startsWith("//") ? "https:" + src : src, quality: "auto", provider: providerName, referer: BASEDOM, captions: [] });
-              return;
-            }
-
-            // prorcp: follow to JS key extraction + RC4 decrypt
-            const proUrl = src.startsWith("//") ? "https:" + src : (src.startsWith("http") ? src : `${BASEDOM}${src.startsWith("/") ? "" : "/"}${src}`);
-            const proRes = await axios.get(proUrl, { headers: { "User-Agent": GS_UA, "Referer": BASEDOM + "/" }, timeout: 8000 });
-            const proHtml = typeof proRes.data === "string" ? proRes.data : JSON.stringify(proRes.data);
-            const proBase = (() => { try { return new URL(proUrl).origin; } catch(e) { return BASEDOM; } })();
-
-            // Try direct m3u8 in prorcp page
-            const proM = proHtml.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/);
-            if (proM) { results.push({ url: proM[1], quality: "auto", provider: providerName, referer: proUrl, captions: [] }); return; }
-
-            // Find JS file (skip cpt.js / jquery)
-            const jsFiles = [...proHtml.matchAll(/src=["']([^"']+\.js[^"']*)['"]/g)].map(m => m[1])
-              .filter(s => !s.includes("cpt.js") && !s.includes("jquery") && !s.includes("cdn."));
-            if (!jsFiles.length) return;
-            const jsRaw = jsFiles[0];
-            const jsUrl = jsRaw.startsWith("http") ? jsRaw : (jsRaw.startsWith("//") ? "https:" + jsRaw : `${proBase}/${jsRaw.replace(/^\//, "")}`);
-            const jsRes = await axios.get(jsUrl, { headers: { "User-Agent": GS_UA, "Referer": proUrl }, timeout: 6000 });
-            const jsCode = typeof jsRes.data === "string" ? jsRes.data : "";
-
-            // Extract RC4 key from JS
-            const keyM = jsCode.match(/(?:key|k|_key|secret)\s*[:=]\s*["']([a-zA-Z0-9!@#$%^&*()_+\-=<>?,./\;:~`"]{8,48})["']/);
-            // Extract encrypted data from prorcp page
-            const encM = proHtml.match(/data(?:-(?:src|url|stream|enc))?\s*[:=]\s*["']([A-Za-z0-9+/=]{20,})["']/);
-            if (!keyM || !encM) return;
-
-            const decrypted = rc4(keyM[1], encM[1]);
-            if (!decrypted.includes(".m3u8") && !decrypted.includes(".mp4")) return;
-            const finalUrl = decrypted.startsWith("//") ? "https:" + decrypted : decrypted;
-            results.push({ url: finalUrl, quality: "auto", provider: providerName, referer: proUrl, captions: [] });
-          } catch(e) {}
+          const url = await followRcp(hash, innerOrigin, innerUrl);
+          if (url) results.push({ url, quality: "auto", provider: "vidsrc.icu", referer: innerOrigin, captions: [] });
         }));
         return results;
       } catch(e) { return []; }
     }
 
-    // embed.su: base64 config → /api/e/{hash} → sources + captions
-    async function scrapeEmbedSu(id, isTV, season, episode) {
+    // vidsrc.rip scraper
+    // Page is mostly JS-rendered. Look for API call patterns in the HTML/JS.
+    async function scrapeVidsrcRip(tmdbId, isTV, season, episode) {
       try {
         const embedUrl = isTV
-          ? `https://embed.su/embed/tv/${id}/${season}/${episode}`
-          : `https://embed.su/embed/movie/${id}`;
-        const embedRes = await axios.get(embedUrl, {
-          headers: { "User-Agent": GS_UA, "Referer": "https://embed.su/" },
-          timeout: 10000,
+          ? `https://vidsrc.rip/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`
+          : `https://vidsrc.rip/embed/movie?tmdb=${tmdbId}`;
+        const res1 = await axios.get(embedUrl, {
+          headers: { "User-Agent": GS_UA, "Referer": "https://vidsrc.rip/" },
+          timeout: 10000, maxRedirects: 5,
         });
-        const html = typeof embedRes.data === "string" ? embedRes.data : "";
-        const cfgM = html.match(/e\s*=\s*["']([A-Za-z0-9+/=]{20,})["']/);
-        if (!cfgM) return [];
-        let config;
-        try { config = JSON.parse(Buffer.from(cfgM[1], "base64").toString("utf8")); } catch(e) { return []; }
-        const hash = config?.hash || config?.h || "";
-        if (!hash) return [];
-        const apiRes = await axios.get(`https://embed.su/api/e/${hash}`, {
-          headers: { "User-Agent": GS_UA, "Referer": embedUrl },
-          timeout: 8000,
-        });
-        const data     = apiRes.data;
-        const sources  = data?.sources  || data?.stream    || [];
-        const caps     = data?.captions || data?.subtitles || [];
-        const captions = caps.map(c => ({ file: c.file || c.url, label: c.label || c.language || "English", kind: "captions" }));
-        return sources
-          .filter(s => s?.file || s?.url)
-          .map(s => ({ url: s.file || s.url, quality: s.quality || s.label || "auto", provider: "embed.su", referer: "https://embed.su/", captions }));
+        const html = typeof res1.data === "string" ? res1.data : "";
+
+        // Direct m3u8
+        const directM = html.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/);
+        if (directM) return [{ url: directM[1], quality: "auto", provider: "vidsrc.rip", referer: "https://vidsrc.rip", captions: [] }];
+
+        // Look for API endpoints embedded in JS: fetch('/api/source/...') or similar
+        const apiPaths = [...html.matchAll(/fetch\s*\(\s*['"](\/api\/[^'"]+)['"]/g)].map(m => m[1]);
+        const apiUrls  = [...html.matchAll(/axios\.get\s*\(\s*['"](\/api\/[^'"]+)['"]/g)].map(m => m[1]);
+        const allApis  = [...new Set([...apiPaths, ...apiUrls])];
+
+        for (const apiPath of allApis.slice(0, 3)) {
+          try {
+            const apiUrl = `https://vidsrc.rip${apiPath}`;
+            const apiRes = await axios.get(apiUrl, {
+              headers: { "User-Agent": GS_UA, "Referer": embedUrl }, timeout: 8000,
+            });
+            const data = apiRes.data;
+            if (data?.url && data.url.includes(".m3u8"))
+              return [{ url: data.url, quality: "auto", provider: "vidsrc.rip", referer: "https://vidsrc.rip", captions: [] }];
+            if (Array.isArray(data?.sources))
+              return data.sources.filter(s => s?.file || s?.url)
+                .map(s => ({ url: s.file || s.url, quality: s.label || "auto", provider: "vidsrc.rip", referer: "https://vidsrc.rip", captions: [] }));
+          } catch(e) {}
+        }
+
+        // Look for JS files that might contain the player config
+        const jsFiles = [...html.matchAll(/src=["']([^"']+\.js[^"']*)["']/g)].map(m => m[1])
+          .filter(s => s.startsWith("/") && !s.includes("jquery") && !s.includes("bootstrap"));
+        for (const jsPath of jsFiles.slice(0, 3)) {
+          try {
+            const jsUrl = `https://vidsrc.rip${jsPath}`;
+            const jsRes = await axios.get(jsUrl, { headers: { "User-Agent": GS_UA, "Referer": embedUrl }, timeout: 6000 });
+            const jsCode = typeof jsRes.data === "string" ? jsRes.data : "";
+            const m3u8M = jsCode.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/);
+            if (m3u8M) return [{ url: m3u8M[1], quality: "auto", provider: "vidsrc.rip", referer: "https://vidsrc.rip", captions: [] }];
+          } catch(e) {}
+        }
+        return [];
       } catch(e) { return []; }
     }
 
-    // seapi.link (multiembed backend): direct JSON API
-    async function scrapeSeapi(id, isTV, season, episode) {
+    // vidsrc.me scraper (IMDB-based, reliable fallback)
+    async function scrapeVidsrcMe(imdbId, tmdbId, isTV, season, episode) {
       try {
-        const base   = `https://seapi.link/?type=tmdb&id=${id}`;
-        const apiUrl = isTV
-          ? `${base}&season=${season}&episode=${episode}&max_results=5`
-          : `${base}&max_results=5`;
-        const r = await axios.get(apiUrl, {
-          headers: { "User-Agent": GS_UA, "Referer": "https://multiembed.mov/", "Origin": "https://multiembed.mov" },
-          timeout: 15000,
+        // vidsrc.me requires IMDB id — fetch it from TMDB if not provided
+        let iid = imdbId;
+        if (!iid && tmdbId) {
+          try {
+            const t = isTV ? "tv" : "movie";
+            const extRes = await axios.get(
+              `https://api.themoviedb.org/3/${t}/${tmdbId}/external_ids?api_key=${TMDB_KEY}`,
+              { timeout: 5000 }
+            );
+            iid = extRes.data?.imdb_id || null;
+          } catch(e) {}
+        }
+        if (!iid) return [];
+
+        const embedUrl = isTV
+          ? `https://vidsrc.me/embed/tv?imdb=${iid}&season=${season}&episode=${episode}`
+          : `https://vidsrc.me/embed/movie?imdb=${iid}`;
+        const res1 = await axios.get(embedUrl, {
+          headers: { "User-Agent": GS_UA, "Referer": "https://vidsrc.me/" },
+          timeout: 10000, maxRedirects: 5,
         });
-        const streams = r.data?.streams || r.data?.sources || [];
-        return streams
-          .filter(s => s?.url && (s.url.includes(".m3u8") || s.url.includes(".mp4")))
-          .map(s => ({ url: s.url, quality: s.quality || "auto", provider: "seapi/multiembed", referer: "https://multiembed.mov/", captions: [] }));
+        const html = typeof res1.data === "string" ? res1.data : "";
+
+        const directM = html.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/);
+        if (directM) return [{ url: directM[1], quality: "auto", provider: "vidsrc.me", referer: "https://vidsrc.me", captions: [] }];
+
+        const hashes = new Set();
+        for (const m of html.matchAll(/data-hash="([^"]{6,})"/g)) hashes.add(m[1]);
+        for (const m of html.matchAll(/data-id="([^"]{6,})"/g))   hashes.add(m[1]);
+        if (!hashes.size) return [];
+
+        const BASEDOM = "https://vidsrc.me";
+        const results = [];
+        await Promise.allSettled([...hashes].slice(0, 4).map(async (hash) => {
+          const url = await followRcp(hash, BASEDOM, embedUrl);
+          if (url) results.push({ url, quality: "auto", provider: "vidsrc.me", referer: BASEDOM, captions: [] });
+        }));
+        return results;
+      } catch(e) { return []; }
+    }
+
+    // superembed/multiembed JSON API (seapi.link replacement)
+    async function scrapeMultiembed(tmdbId, isTV, season, episode) {
+      try {
+        const apiUrl = isTV
+          ? `https://multiembed.mov/directstream.php?video_id=${tmdbId}&tmdb=1&s=${season}&e=${episode}`
+          : `https://multiembed.mov/directstream.php?video_id=${tmdbId}&tmdb=1`;
+        // Hit the API endpoint that returns JSON sources
+        const apiJsonUrl = isTV
+          ? `https://multiembed.mov/json.php?video_id=${tmdbId}&tmdb=1&s=${season}&e=${episode}`
+          : `https://multiembed.mov/json.php?video_id=${tmdbId}&tmdb=1`;
+        const r = await axios.get(apiJsonUrl, {
+          headers: { "User-Agent": GS_UA, "Referer": "https://multiembed.mov/", "Accept": "application/json" },
+          timeout: 10000,
+        });
+        const data = r.data;
+        if (data?.link && (data.link.includes(".m3u8") || data.link.includes(".mp4"))) {
+          return [{ url: data.link, quality: "auto", provider: "multiembed", referer: "https://multiembed.mov/", captions: [] }];
+        }
+        const sources = data?.sources || data?.streams || [];
+        return sources.filter(s => s?.file || s?.url)
+          .map(s => ({ url: s.file || s.url, quality: s.label || "auto", provider: "multiembed", referer: "https://multiembed.mov/", captions: [] }));
       } catch(e) { return []; }
     }
 
     try {
-      const isTV = type === "tv";
-      const id   = tmdbId || imdbId;
+      const isTV  = type === "tv";
+      const id    = tmdbId || imdbId;
 
-      // Build embed URLs for each provider
-      const icuUrl = isTV
-        ? `https://vidsrc.icu/embed/tv/${id}/${season}/${episode}`
-        : `https://vidsrc.icu/embed/movie/${id}`;
-      const ripUrl = isTV
-        ? `https://vidsrc.rip/embed/tv?tmdb=${id}&season=${season}&episode=${episode}`
-        : `https://vidsrc.rip/embed/movie?tmdb=${id}`;
-
-      // Fire all 4 providers in parallel — don't let one timeout block others
-      const [icuR, ripR, suR, seapiR] = await Promise.allSettled([
-        scrapeVidsrcFamily(icuUrl,  "vidsrc.icu", "https://vidsrc.icu"),
-        scrapeVidsrcFamily(ripUrl,  "vidsrc.rip", "https://vidsrc.rip"),
-        scrapeEmbedSu(id, isTV, season, episode),
-        scrapeSeapi(id, isTV, season, episode),
+      const [icuR, ripR, meR, multiR] = await Promise.allSettled([
+        scrapeVidsrcIcu(id, isTV, season, episode),
+        scrapeVidsrcRip(id, isTV, season, episode),
+        scrapeVidsrcMe(imdbId, tmdbId, isTV, season, episode),
+        scrapeMultiembed(id, isTV, season, episode),
       ]);
 
       const streams = [
         ...(icuR.status   === "fulfilled" ? icuR.value   : []),
         ...(ripR.status   === "fulfilled" ? ripR.value   : []),
-        ...(suR.status    === "fulfilled" ? suR.value    : []),
-        ...(seapiR.status === "fulfilled" ? seapiR.value : []),
+        ...(meR.status    === "fulfilled" ? meR.value    : []),
+        ...(multiR.status === "fulfilled" ? multiR.value : []),
       ].filter(s => s?.url);
 
       res.end(JSON.stringify({ streams, count: streams.length }));
@@ -1234,116 +1312,6 @@ module.exports = async (req, res) => {
       res.statusCode = 502;
       res.end(JSON.stringify({ streams: [], error: e.message }));
     }
-    return;
-  }
-
-
-  // ── /debug-source — returns raw diagnostic info from each provider ──
-  // GET /debug-source?tmdb=ID&type=movie
-  if (path === "/debug-source") {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Content-Type", "application/json");
-    const qs     = new URL(req.url, "http://localhost").searchParams;
-    const tmdbId = qs.get("tmdb") || "550";
-    const type   = qs.get("type") || "movie";
-    const season = qs.get("s") || "1";
-    const episode= qs.get("e") || "1";
-    const isTV   = type === "tv";
-    const UA     = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36";
-
-    const diag = {};
-
-    // Test vidsrc.icu
-    try {
-      const url = isTV
-        ? `https://vidsrc.icu/embed/tv/${tmdbId}/${season}/${episode}`
-        : `https://vidsrc.icu/embed/movie/${tmdbId}`;
-      const r = await axios.get(url, {
-        headers: { "User-Agent": UA, "Referer": "https://vidsrc.icu/" },
-        timeout: 10000, maxRedirects: 5,
-      });
-      const html = typeof r.data === "string" ? r.data : JSON.stringify(r.data);
-      const hashes = [...html.matchAll(/data-hash="([^"]{6,})"/g)].map(m => m[1]);
-      const dataIds = [...html.matchAll(/data-id="([^"]{6,})"/g)].map(m => m[1]);
-      const m3u8 = (html.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/) || [])[1] || null;
-      const iframeSrc = (html.match(/src=["'](https?:\/\/[^"']+\/embed\/[^"']*)["']/i) || [])[1] || null;
-      diag.vidsrc_icu = {
-        status: r.status,
-        url,
-        html_len: html.length,
-        data_hashes: hashes,
-        data_ids: dataIds,
-        m3u8_found: m3u8,
-        iframe_src: iframeSrc,
-        html_snippet: html.slice(0, 500),
-      };
-    } catch(e) {
-      diag.vidsrc_icu = { error: e.message, code: e.code };
-    }
-
-    // Test vidsrc.rip
-    try {
-      const url = isTV
-        ? `https://vidsrc.rip/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`
-        : `https://vidsrc.rip/embed/movie?tmdb=${tmdbId}`;
-      const r = await axios.get(url, {
-        headers: { "User-Agent": UA, "Referer": "https://vidsrc.rip/" },
-        timeout: 10000, maxRedirects: 5,
-      });
-      const html = typeof r.data === "string" ? r.data : JSON.stringify(r.data);
-      const hashes = [...html.matchAll(/data-hash="([^"]{6,})"/g)].map(m => m[1]);
-      const m3u8 = (html.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/) || [])[1] || null;
-      diag.vidsrc_rip = {
-        status: r.status,
-        url,
-        html_len: html.length,
-        data_hashes: hashes,
-        m3u8_found: m3u8,
-        html_snippet: html.slice(0, 500),
-      };
-    } catch(e) {
-      diag.vidsrc_rip = { error: e.message, code: e.code };
-    }
-
-    // Test embed.su
-    try {
-      const url = isTV
-        ? `https://embed.su/embed/tv/${tmdbId}/${season}/${episode}`
-        : `https://embed.su/embed/movie/${tmdbId}`;
-      const r = await axios.get(url, {
-        headers: { "User-Agent": UA, "Referer": "https://embed.su/" },
-        timeout: 10000,
-      });
-      const html = typeof r.data === "string" ? r.data : JSON.stringify(r.data);
-      const cfgMatch = (html.match(/\be\s*=\s*["']([A-Za-z0-9+/=]{20,})["']/) || [])[1] || null;
-      diag.embed_su = {
-        status: r.status,
-        url,
-        html_len: html.length,
-        config_b64_found: cfgMatch ? cfgMatch.slice(0, 30) + "..." : null,
-        html_snippet: html.slice(0, 500),
-      };
-    } catch(e) {
-      diag.embed_su = { error: e.message, code: e.code };
-    }
-
-    // Test seapi
-    try {
-      const url = `https://seapi.link/?type=tmdb&id=${tmdbId}&max_results=5`;
-      const r = await axios.get(url, {
-        headers: { "User-Agent": UA, "Referer": "https://multiembed.mov/", "Origin": "https://multiembed.mov" },
-        timeout: 15000,
-      });
-      diag.seapi = {
-        status: r.status,
-        url,
-        data: r.data,
-      };
-    } catch(e) {
-      diag.seapi = { error: e.message, code: e.code };
-    }
-
-    res.end(JSON.stringify(diag, null, 2));
     return;
   }
 
