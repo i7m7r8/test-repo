@@ -1237,6 +1237,116 @@ module.exports = async (req, res) => {
     return;
   }
 
+
+  // ── /debug-source — returns raw diagnostic info from each provider ──
+  // GET /debug-source?tmdb=ID&type=movie
+  if (path === "/debug-source") {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Content-Type", "application/json");
+    const qs     = new URL(req.url, "http://localhost").searchParams;
+    const tmdbId = qs.get("tmdb") || "550";
+    const type   = qs.get("type") || "movie";
+    const season = qs.get("s") || "1";
+    const episode= qs.get("e") || "1";
+    const isTV   = type === "tv";
+    const UA     = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36";
+
+    const diag = {};
+
+    // Test vidsrc.icu
+    try {
+      const url = isTV
+        ? `https://vidsrc.icu/embed/tv/${tmdbId}/${season}/${episode}`
+        : `https://vidsrc.icu/embed/movie/${tmdbId}`;
+      const r = await axios.get(url, {
+        headers: { "User-Agent": UA, "Referer": "https://vidsrc.icu/" },
+        timeout: 10000, maxRedirects: 5,
+      });
+      const html = typeof r.data === "string" ? r.data : JSON.stringify(r.data);
+      const hashes = [...html.matchAll(/data-hash="([^"]{6,})"/g)].map(m => m[1]);
+      const dataIds = [...html.matchAll(/data-id="([^"]{6,})"/g)].map(m => m[1]);
+      const m3u8 = (html.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/) || [])[1] || null;
+      const iframeSrc = (html.match(/src=["'](https?:\/\/[^"']+\/embed\/[^"']*)["']/i) || [])[1] || null;
+      diag.vidsrc_icu = {
+        status: r.status,
+        url,
+        html_len: html.length,
+        data_hashes: hashes,
+        data_ids: dataIds,
+        m3u8_found: m3u8,
+        iframe_src: iframeSrc,
+        html_snippet: html.slice(0, 500),
+      };
+    } catch(e) {
+      diag.vidsrc_icu = { error: e.message, code: e.code };
+    }
+
+    // Test vidsrc.rip
+    try {
+      const url = isTV
+        ? `https://vidsrc.rip/embed/tv?tmdb=${tmdbId}&season=${season}&episode=${episode}`
+        : `https://vidsrc.rip/embed/movie?tmdb=${tmdbId}`;
+      const r = await axios.get(url, {
+        headers: { "User-Agent": UA, "Referer": "https://vidsrc.rip/" },
+        timeout: 10000, maxRedirects: 5,
+      });
+      const html = typeof r.data === "string" ? r.data : JSON.stringify(r.data);
+      const hashes = [...html.matchAll(/data-hash="([^"]{6,})"/g)].map(m => m[1]);
+      const m3u8 = (html.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/) || [])[1] || null;
+      diag.vidsrc_rip = {
+        status: r.status,
+        url,
+        html_len: html.length,
+        data_hashes: hashes,
+        m3u8_found: m3u8,
+        html_snippet: html.slice(0, 500),
+      };
+    } catch(e) {
+      diag.vidsrc_rip = { error: e.message, code: e.code };
+    }
+
+    // Test embed.su
+    try {
+      const url = isTV
+        ? `https://embed.su/embed/tv/${tmdbId}/${season}/${episode}`
+        : `https://embed.su/embed/movie/${tmdbId}`;
+      const r = await axios.get(url, {
+        headers: { "User-Agent": UA, "Referer": "https://embed.su/" },
+        timeout: 10000,
+      });
+      const html = typeof r.data === "string" ? r.data : JSON.stringify(r.data);
+      const cfgMatch = (html.match(/\be\s*=\s*["']([A-Za-z0-9+/=]{20,})["']/) || [])[1] || null;
+      diag.embed_su = {
+        status: r.status,
+        url,
+        html_len: html.length,
+        config_b64_found: cfgMatch ? cfgMatch.slice(0, 30) + "..." : null,
+        html_snippet: html.slice(0, 500),
+      };
+    } catch(e) {
+      diag.embed_su = { error: e.message, code: e.code };
+    }
+
+    // Test seapi
+    try {
+      const url = `https://seapi.link/?type=tmdb&id=${tmdbId}&max_results=5`;
+      const r = await axios.get(url, {
+        headers: { "User-Agent": UA, "Referer": "https://multiembed.mov/", "Origin": "https://multiembed.mov" },
+        timeout: 15000,
+      });
+      diag.seapi = {
+        status: r.status,
+        url,
+        data: r.data,
+      };
+    } catch(e) {
+      diag.seapi = { error: e.message, code: e.code };
+    }
+
+    res.end(JSON.stringify(diag, null, 2));
+    return;
+  }
+
   res.statusCode = 404;
   res.end(JSON.stringify({ error: "not found" }));
 };
