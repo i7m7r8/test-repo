@@ -1315,6 +1315,115 @@ module.exports = async (req, res) => {
     return;
   }
 
+
+  // ── /debug2 — deep chain debug ───────────────────────────────
+  if (path === "/debug2") {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Content-Type", "application/json");
+    const qs     = new URL(req.url, "http://localhost").searchParams;
+    const tmdbId = qs.get("tmdb") || "550";
+    const UA     = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36";
+    const diag   = {};
+
+    // Step 1: vidsrc.icu outer page
+    try {
+      const outerUrl = `https://vidsrc.icu/embed/movie/${tmdbId}`;
+      const r1 = await axios.get(outerUrl, {
+        headers: { "User-Agent": UA, "Referer": "https://vidsrc.icu/" },
+        timeout: 10000, maxRedirects: 5,
+      });
+      const outerHtml = typeof r1.data === "string" ? r1.data : "";
+      // All iframes
+      const allIframes = [...outerHtml.matchAll(/src=["']([^"']+)["']/g)]
+        .map(m => m[1]).filter(u => u.startsWith("http") && u.includes("embed"));
+      diag.icu_outer = { status: r1.status, html_len: outerHtml.length, iframes: allIframes };
+
+      // Step 2: follow first iframe
+      if (allIframes.length) {
+        const innerUrl = allIframes[0];
+        const innerOrigin = (() => { try { return new URL(innerUrl).origin; } catch(e) { return ""; } })();
+        try {
+          const r2 = await axios.get(innerUrl, {
+            headers: { "User-Agent": UA, "Referer": outerUrl },
+            timeout: 10000, maxRedirects: 5,
+          });
+          const innerHtml = typeof r2.data === "string" ? r2.data : "";
+          const hashes = [...innerHtml.matchAll(/data-hash="([^"]{4,})"/g)].map(m => m[1]);
+          const dataIds = [...innerHtml.matchAll(/data-id="([^"]{4,})"/g)].map(m => m[1]);
+          const m3u8   = (innerHtml.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/) || [])[1] || null;
+          const rcpPaths = [...innerHtml.matchAll(/\/rcp\/([a-zA-Z0-9_=-]{4,})/g)].map(m => m[1]);
+          const scripts  = [...innerHtml.matchAll(/src=["']([^"']+\.js[^"']*)["']/g)].map(m => m[1]);
+          const allSrcs  = [...innerHtml.matchAll(/src=["']([^"']{4,})["']/g)].map(m => m[1]);
+          diag.icu_inner = {
+            status: r2.status, url: innerUrl, origin: innerOrigin,
+            html_len: innerHtml.length,
+            data_hashes: hashes, data_ids: dataIds,
+            rcp_paths: rcpPaths, m3u8, scripts,
+            all_src_attrs: allSrcs.slice(0, 20),
+            snippet: innerHtml.slice(0, 800),
+          };
+
+          // Step 3: try first rcp hash if found
+          const firstHash = [...hashes, ...rcpPaths][0];
+          if (firstHash && innerOrigin) {
+            try {
+              const rcpUrl = `${innerOrigin}/rcp/${firstHash}`;
+              const r3 = await axios.get(rcpUrl, {
+                headers: { "User-Agent": UA, "Referer": innerUrl, "X-Requested-With": "XMLHttpRequest" },
+                timeout: 8000,
+              });
+              const rcpHtml = typeof r3.data === "string" ? r3.data : JSON.stringify(r3.data);
+              diag.icu_rcp = { status: r3.status, url: rcpUrl, snippet: rcpHtml.slice(0, 600) };
+            } catch(e) { diag.icu_rcp = { error: e.message }; }
+          }
+        } catch(e) { diag.icu_inner = { error: e.message, url: innerUrl }; }
+      }
+    } catch(e) { diag.icu_outer = { error: e.message }; }
+
+    // Step 4: vidsrc.rip full HTML dump
+    try {
+      const ripUrl = `https://vidsrc.rip/embed/movie?tmdb=${tmdbId}`;
+      const r4 = await axios.get(ripUrl, {
+        headers: { "User-Agent": UA, "Referer": "https://vidsrc.rip/" },
+        timeout: 10000, maxRedirects: 5,
+      });
+      const html = typeof r4.data === "string" ? r4.data : "";
+      const scripts = [...html.matchAll(/src=["']([^"']+\.js[^"']*)["']/g)].map(m => m[1]);
+      const fetchPaths = [...html.matchAll(/fetch\s*\(\s*["']([^"']+)["']/g)].map(m => m[1]);
+      const iframes = [...html.matchAll(/src=["']([^"']+)["']/g)].map(m => m[1]).filter(u => u.startsWith("http"));
+      diag.vidsrc_rip = {
+        status: r4.status, html_len: html.length,
+        scripts, fetch_calls: fetchPaths, iframes,
+        full_html: html,
+      };
+    } catch(e) { diag.vidsrc_rip = { error: e.message }; }
+
+    // Step 5: vidsrc.me with imdb id
+    try {
+      const extRes = await axios.get(
+        `https://api.themoviedb.org/3/movie/550/external_ids?api_key=4ef0d7355d9ffb5151e987764708ce96`,
+        { timeout: 5000 }
+      );
+      const imdbId = extRes.data?.imdb_id;
+      diag.imdb_id = imdbId;
+      if (imdbId) {
+        const meUrl = `https://vidsrc.me/embed/movie?imdb=${imdbId}`;
+        const r5 = await axios.get(meUrl, {
+          headers: { "User-Agent": UA, "Referer": "https://vidsrc.me/" },
+          timeout: 10000, maxRedirects: 5,
+        });
+        const html = typeof r5.data === "string" ? r5.data : "";
+        const hashes = [...html.matchAll(/data-hash="([^"]{4,})"/g)].map(m => m[1]);
+        const m3u8  = (html.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/) || [])[1] || null;
+        const iframes = [...html.matchAll(/src=["']([^"']+)["']/g)].map(m => m[1]).filter(u => u.startsWith("http"));
+        diag.vidsrc_me = { status: r5.status, url: meUrl, html_len: html.length, hashes, m3u8, iframes, snippet: html.slice(0, 600) };
+      }
+    } catch(e) { diag.vidsrc_me = { error: e.message }; }
+
+    res.end(JSON.stringify(diag, null, 2));
+    return;
+  }
+
   res.statusCode = 404;
   res.end(JSON.stringify({ error: "not found" }));
 };
