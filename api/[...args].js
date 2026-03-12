@@ -1082,7 +1082,32 @@ module.exports = async (req, res) => {
 
     const CLOUDNESTRA = "https://cloudnestra.com";
 
+    // Resolve {v1} placeholder in stream URLs by fetching the prorcp JS
+    // The JS contains: var v1="cdn-host.example.com" or similar
+    async function resolveV1(proUrl, proHtml) {
+      try {
+        const proBase = (() => { try { return new URL(proUrl).origin; } catch(e) { return CLOUDNESTRA; } })();
+        const jsFiles = [...proHtml.matchAll(/src=["']([^"']+\.js[^"']*)["']/g)]
+          .map(m => m[1])
+          .filter(s => !s.includes("cpt.js") && !s.includes("jquery") && !s.includes("cloudflare") && !s.includes("unpkg") && !s.includes("disable-devtool"));
+        for (const jsRaw of jsFiles.slice(0, 4)) {
+          const jsUrl = jsRaw.startsWith("http") ? jsRaw
+            : jsRaw.startsWith("//") ? "https:" + jsRaw
+            : `${proBase}/${jsRaw.replace(/^\//, "")}`;
+          try {
+            const jsRes = await axios.get(jsUrl, { headers: { "User-Agent": GS_UA, "Referer": proUrl }, timeout: 6000 });
+            const jsCode = typeof jsRes.data === "string" ? jsRes.data : "";
+            // v1 is set as: var v1="something.com" or v1="..." anywhere
+            const v1M = jsCode.match(/\bv1\s*=\s*["']([a-zA-Z0-9][a-zA-Z0-9.-]{3,60})["']/);
+            if (v1M) return v1M[1];
+          } catch(e) {}
+        }
+      } catch(e) {}
+      return null;
+    }
+
     // Follow one RCP hash through cloudnestra → prorcp → JS key → RC4 → m3u8
+    // Also resolves {v1} placeholder in the resulting URL
     async function followCloudnestraRcp(hash, referer) {
       try {
         const rcpUrl = `${CLOUDNESTRA}/rcp/${hash}`;
@@ -1092,15 +1117,12 @@ module.exports = async (req, res) => {
         });
         const rcpHtml = typeof rcpRes.data === "string" ? rcpRes.data : JSON.stringify(rcpRes.data);
 
-        // Look for src: '...' pointing to prorcp or direct m3u8
         const srcM = rcpHtml.match(/src:\s*['"]([^'"]+)['"]/);
         if (!srcM) return null;
         const src = srcM[1];
 
-        // Direct m3u8
         if (/\.m3u8/i.test(src)) return src.startsWith("//") ? "https:" + src : src;
 
-        // Build prorcp URL
         const proUrl = src.startsWith("//") ? "https:" + src
           : src.startsWith("http") ? src
           : `${CLOUDNESTRA}${src.startsWith("/") ? "" : "/"}${src}`;
@@ -1113,34 +1135,52 @@ module.exports = async (req, res) => {
 
         // Direct m3u8 in prorcp page
         const directM = proHtml.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/);
-        if (directM) return directM[1];
+        if (directM) {
+          let url = directM[1];
+          if (url.includes("{v1}")) {
+            const v1 = await resolveV1(proUrl, proHtml);
+            if (v1) url = url.replace("{v1}", v1);
+          }
+          return url;
+        }
 
-        // Find key JS (skip cpt.js, jquery, cdn files)
+        // Find key JS
         const proBase = (() => { try { return new URL(proUrl).origin; } catch(e) { return CLOUDNESTRA; } })();
         const jsFiles = [...proHtml.matchAll(/src=["']([^"']+\.js[^"']*)["']/g)]
           .map(m => m[1])
-          .filter(s => !s.includes("cpt.js") && !s.includes("jquery") && !s.includes("cloudflare") && !s.includes("unpkg"));
+          .filter(s => !s.includes("cpt.js") && !s.includes("jquery") && !s.includes("cloudflare") && !s.includes("unpkg") && !s.includes("disable-devtool"));
         if (!jsFiles.length) return null;
 
-        const jsRaw = jsFiles[0];
-        const jsUrl = jsRaw.startsWith("http") ? jsRaw
-          : jsRaw.startsWith("//") ? "https:" + jsRaw
-          : `${proBase}/${jsRaw.replace(/^\//, "")}`;
+        // Try all non-CDN JS files for key extraction + v1
+        let foundKey = null, foundV1 = null;
+        for (const jsRaw of jsFiles.slice(0, 4)) {
+          const jsUrl = jsRaw.startsWith("http") ? jsRaw
+            : jsRaw.startsWith("//") ? "https:" + jsRaw
+            : `${proBase}/${jsRaw.replace(/^\//, "")}`;
+          try {
+            const jsRes  = await axios.get(jsUrl, { headers: { "User-Agent": GS_UA, "Referer": proUrl }, timeout: 6000 });
+            const jsCode = typeof jsRes.data === "string" ? jsRes.data : "";
+            if (!foundKey) {
+              const keyM = jsCode.match(/(?:key|k|_key|secret|password)\s*[:=]\s*["']([^"']{8,64})["']/);
+              if (keyM) foundKey = keyM[1];
+            }
+            if (!foundV1) {
+              const v1M = jsCode.match(/\bv1\s*=\s*["']([a-zA-Z0-9][a-zA-Z0-9.-]{3,60})["']/);
+              if (v1M) foundV1 = v1M[1];
+            }
+            if (foundKey && foundV1) break;
+          } catch(e) {}
+        }
+        if (!foundKey) return null;
 
-        const jsRes  = await axios.get(jsUrl, { headers: { "User-Agent": GS_UA, "Referer": proUrl }, timeout: 8000 });
-        const jsCode = typeof jsRes.data === "string" ? jsRes.data : "";
-
-        // Extract RC4 key — look for quoted string 8–64 chars assigned to key/k/secret
-        const keyM = jsCode.match(/(?:^|[,;{\s])(?:key|k|_key|secret|password)\s*[:=]\s*["']([^"']{8,64})["']/m);
-        if (!keyM) return null;
-
-        // Extract encrypted data blob from prorcp page
         const encM = proHtml.match(/data(?:-(?:src|url|stream|enc))?\s*[:=]\s*["']([A-Za-z0-9+/=]{20,})["']/);
         if (!encM) return null;
 
-        const decrypted = rc4(keyM[1], encM[1]);
+        const decrypted = rc4(foundKey, encM[1]);
         if (!decrypted.includes(".m3u8") && !decrypted.includes(".mp4")) return null;
-        return decrypted.startsWith("//") ? "https:" + decrypted : decrypted;
+        let finalUrl = decrypted.startsWith("//") ? "https:" + decrypted : decrypted;
+        if (finalUrl.includes("{v1}") && foundV1) finalUrl = finalUrl.replace("{v1}", foundV1);
+        return finalUrl;
       } catch(e) { return null; }
     }
 
@@ -1293,7 +1333,8 @@ module.exports = async (req, res) => {
     return;
   }
 
+
+
   res.statusCode = 404;
   res.end(JSON.stringify({ error: "not found" }));
 };
- 
