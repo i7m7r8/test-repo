@@ -1571,6 +1571,112 @@ module.exports = async (req, res) => {
     return;
   }
 
+
+  // ── /torrent-stream ──────────────────────────────────────────────────────────
+  // GET /torrent-stream?hash=INFOHASH&idx=0
+  // GET /torrent-stream?imdb=tt0137523&type=movie  (auto-fetches from Torrentio)
+  if (path === "/torrent-stream") {
+    const qs       = new URL(req.url, "http://localhost").searchParams;
+    let   infoHash = (qs.get("hash") || "").toLowerCase().trim();
+    const fileIdx  = parseInt(qs.get("idx") || "0");
+    const imdbId   = qs.get("imdb") || "";
+    const type     = qs.get("type") || "movie";
+    const season   = qs.get("s")    || "1";
+    const episode  = qs.get("e")    || "1";
+
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges, Content-Type");
+    if (req.method === "OPTIONS") { res.statusCode = 200; res.end(); return; }
+
+    if (!infoHash && imdbId) {
+      try {
+        const tioUrl = type === "tv"
+          ? `https://torrentio.strem.fun/stream/series/${imdbId}:${season}:${episode}.json`
+          : `https://torrentio.strem.fun/stream/movie/${imdbId}.json`;
+        const tioRes = await axios.get(tioUrl, { timeout: 10000 });
+        const streams = tioRes.data?.streams || [];
+        const ranked = streams
+          .filter(s => s.infoHash)
+          .sort((a, b) => {
+            const score = t => /1080/i.test(t) ? 4 : /720/i.test(t) ? 3 : /480/i.test(t) ? 2 : 1;
+            return score(b.title || "") - score(a.title || "");
+          });
+        if (ranked[0]) infoHash = ranked[0].infoHash.toLowerCase();
+      } catch(e) {
+        res.statusCode = 502;
+        res.end(JSON.stringify({ error: "torrentio fetch failed: " + e.message }));
+        return;
+      }
+    }
+
+    if (!infoHash) {
+      res.statusCode = 400;
+      res.end(JSON.stringify({ error: "hash or imdb required" }));
+      return;
+    }
+
+    let WebTorrent;
+    try { WebTorrent = require("webtorrent"); }
+    catch(e) { res.statusCode = 500; res.end(JSON.stringify({ error: "webtorrent not installed" })); return; }
+
+    const magnet = `magnet:?xt=urn:btih:${infoHash}`
+      + `&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce`
+      + `&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce`
+      + `&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce`
+      + `&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce`;
+
+    const client = new WebTorrent();
+    let responded = false;
+    const cleanup = () => { try { client.destroy(); } catch(e) {} };
+
+    const timer = setTimeout(() => {
+      if (!responded) {
+        responded = true; cleanup();
+        if (!res.headersSent) { res.statusCode = 504; res.end(JSON.stringify({ error: "timeout — no peers" })); }
+      }
+    }, 30000);
+
+    client.on("error", err => {
+      if (!responded) {
+        responded = true; clearTimeout(timer); cleanup();
+        if (!res.headersSent) { res.statusCode = 502; res.end(JSON.stringify({ error: err.message })); }
+      }
+    });
+
+    client.add(magnet, { path: "/tmp/cv-" + infoHash }, torrent => {
+      clearTimeout(timer);
+      const videoExts = /\.(mp4|mkv|avi|mov|webm|m4v|ts)$/i;
+      const files = torrent.files.filter(f => videoExts.test(f.name));
+      const file = files.sort((a, b) => b.length - a.length)[fileIdx] || files[0] || torrent.files[0];
+
+      if (!file) { responded = true; cleanup(); res.statusCode = 404; res.end(JSON.stringify({ error: "no video file" })); return; }
+
+      responded = true;
+      const fileSize = file.length;
+      const range = req.headers["range"];
+      res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader("Content-Type", "video/mp4");
+
+      if (range) {
+        const parts = range.replace(/bytes=/, "").split("-");
+        const start = parseInt(parts[0], 10);
+        const end   = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+        res.statusCode = 206;
+        res.setHeader("Content-Range",  `bytes ${start}-${end}/${fileSize}`);
+        res.setHeader("Content-Length", end - start + 1);
+        file.createReadStream({ start, end }).pipe(res);
+        res.on("close", cleanup);
+      } else {
+        res.statusCode = 200;
+        res.setHeader("Content-Length", fileSize);
+        file.createReadStream().pipe(res);
+        res.on("close", cleanup);
+      }
+    });
+    return;
+  }
+
   res.statusCode = 404;
   res.end(JSON.stringify({ error: "not found" }));
 };
